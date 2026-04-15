@@ -1,0 +1,216 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String     @id @default(cuid())
+  firebaseUid     String     @unique
+  email           String     @unique
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime
+  gender          Gender
+  location        String
+  bio             String?
+  occupation      String?
+  education       String?
+  height          Int? // in centimeters
+  profilePictures String[] // URLs to profile images (legacy, kept for compat)
+  profileVideos   String[] // All uploaded video URLs
+  profileVideo    String?  // Active video shown in feed (must be in profileVideos)
+  interests       String[] // Array of interest tags
+  lookingFor      LookingFor
+  ageRangeMin     Int        @default(18)
+  ageRangeMax     Int        @default(99)
+  maxDistance     Int        @default(50) // in kilometers
+  lat                Float?     // geocoded latitude
+  lng                Float?     // geocoded longitude
+  isVerified         Boolean    @default(false)
+  verificationStatus VerificationStatus @default(NONE)
+  isActive           Boolean    @default(true)
+  isPremium          Boolean    @default(false)
+  fcmToken           String?    // Firebase Cloud Messaging device token
+  stripeCustomerId   String?    @unique
+  subscriptionId     String?    // Stripe subscription ID
+  boostedUntil       DateTime?  // Profile boost expiry
+  lastActive         DateTime   @default(now())
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  // Relationships
+  sentLikes        Like[]          @relation("LikeSender")
+  receivedLikes    Like[]          @relation("LikeReceiver")
+  sentMessages     Message[]       @relation("MessageSender")
+  receivedMessages Message[]       @relation("MessageReceiver")
+  matches          Match[]         @relation("MatchUser1")
+  matchedWith      Match[]         @relation("MatchUser2")
+  reports          Report[]        @relation("ReportReporter")
+  reportedBy       Report[]        @relation("ReportReported")
+  blocks           Block[]         @relation("BlockBlocker")
+  blockedBy        Block[]         @relation("BlockBlocked")
+  preferences      UserPreference?
+
+  @@map("users")
+}
+
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Matching preferences
+  dealBreakers         String[] // Array of deal breaker tags
+  mustHaves            String[] // Array of must-have tags
+  lifestylePreferences Json? // Flexible JSON for lifestyle preferences
+
+  // Privacy settings
+  showAge        Boolean @default(true)
+  showDistance   Boolean @default(true)
+  showLastActive Boolean @default(true)
+
+  // Notification settings
+  emailNotifications   Boolean @default(true)
+  pushNotifications    Boolean @default(true)
+  matchNotifications   Boolean @default(true)
+  messageNotifications Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_preferences")
+}
+
+model Like {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  isSuper    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  sender   User @relation("LikeSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("LikeReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@map("likes")
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  isActive  Boolean  @default(true)
+
+  user1    User      @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2    User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([user1Id, user2Id])
+  @@map("matches")
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  matchId     String
+  senderId    String
+  receiverId  String
+  content     String
+  messageType MessageType @default(TEXT)
+  isRead      Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  // Sender FK → users(id)
+  sender User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade, map: "messages_senderId_fkey")
+
+  // Receiver FK → users(id)
+  receiver User @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade, map: "messages_receiverId_fkey")
+
+  @@index([matchId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@map("messages")
+}
+
+model Report {
+  id          String       @id @default(cuid())
+  reporterId  String
+  reportedId  String
+  reason      ReportReason
+  description String?
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  reporter User @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported User @relation("ReportReported", fields: [reportedId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  NON_BINARY
+  OTHER
+}
+
+enum LookingFor {
+  RELATIONSHIP
+  CASUAL
+  FRIENDSHIP
+  NETWORKING
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  GIF
+  EMOJI
+  VIDEO
+}
+
+enum ReportReason {
+  INAPPROPRIATE_CONTENT
+  HARASSMENT
+  FAKE_PROFILE
+  SPAM
+  UNDERAGE
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum VerificationStatus {
+  NONE
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlockBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockBlocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@map("blocks")
+}

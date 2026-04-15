@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ken Burns photo animations for the feed */
+@keyframes kb1 {
+  0%   { transform: scale(1.0)  translate(0%,    0%);   }
+  100% { transform: scale(1.12) translate(-2%,  -1.5%); }
+}
+@keyframes kb2 {
+  0%   { transform: scale(1.1)  translate(-1%,   0%);   }
+  100% { transform: scale(1.0)  translate(1.5%, -2%);   }
+}
+@keyframes kb3 {
+  0%   { transform: scale(1.05) translate(1%,    1%);   }
+  100% { transform: scale(1.15) translate(-1%,  -0.5%); }
+}
+@keyframes kb4 {
+  0%   { transform: scale(1.12) translate(0%,   -1%);   }
+  100% { transform: scale(1.0)  translate(-1.5%, 1%);   }
+}
+
+.kb1 { animation: kb1 8s ease-in-out forwards; }
+.kb2 { animation: kb2 9s ease-in-out forwards; }
+.kb3 { animation: kb3 7s ease-in-out forwards; }
+.kb4 { animation: kb4 10s ease-in-out forwards; }
+
+/* Hide scrollbar on feed */
+.feed-scroll { scrollbar-width: none; }
+.feed-scroll::-webkit-scrollbar { display: none; }
