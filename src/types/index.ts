@@ -84,6 +84,7 @@ export interface SwipeCard {
     age: number;
     activity: number;
   };
+  reason?: string;
 }
 
 export interface MatchingAlgorithmResult {

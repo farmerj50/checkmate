@@ -69,6 +69,25 @@ export interface ScoredMatch {
     age: number;
     activity: number;
   };
+  reason: string;
+}
+
+/**
+ * Human-readable explanation of why this profile appeared.
+ * Used by the dev debug overlay — dominant factor wins.
+ */
+export function buildReason(
+  sb: { interest: number; age: number; activity: number },
+  commonInterests: string[],
+): string {
+  const parts: string[] = [];
+  if (sb.interest >= 60 && commonInterests.length > 0)
+    parts.push(`shared ${commonInterests.slice(0, 2).join(' & ')}`);
+  else if (sb.interest >= 35)
+    parts.push('some common interests');
+  if (sb.age >= 80) parts.push('ideal age match');
+  if (sb.activity >= 80) parts.push('recently active');
+  return parts.length > 0 ? parts.join(' + ') : 'proximity match';
 }
 
 /**
@@ -94,12 +113,14 @@ export function scoreCandidate(
   // Weighted composite: interests 40%, age fit 35%, activity 25%
   const composite = Math.round(iScore * 0.4 + aScore * 0.35 + actScore * 0.25);
 
+  const scoreBreakdown = { interest: iScore, age: aScore, activity: actScore };
   return {
     user: candidate,
     distance: Math.round(distanceKm),
     compatibilityScore: Math.max(1, Math.min(100, composite)),
     commonInterests: common,
-    scoreBreakdown: { interest: iScore, age: aScore, activity: actScore },
+    scoreBreakdown,
+    reason: buildReason(scoreBreakdown, common),
   };
 }
 

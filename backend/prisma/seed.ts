@@ -531,7 +531,34 @@ async function main() {
     );
   }
 
-  // 3. Clear stale likes from demo_user so all profiles appear in feed
+  // 3. Pre-seed reciprocal likes: these 6 users already "liked" demo_user.
+  //    When demo_user likes them back the real /matches/like endpoint finds the
+  //    mutual like and fires a real Match — no frontend randomness needed.
+  const AUTO_LIKERS = [
+    { uid: 'test_user_1',  isSuper: false },  // Sofia
+    { uid: 'test_user_2',  isSuper: true  },  // James  (super like)
+    { uid: 'test_user_5',  isSuper: false },  // Priya
+    { uid: 'test_user_8',  isSuper: false },  // Aisha
+    { uid: 'test_user_14', isSuper: true  },  // Isabelle (super like)
+    { uid: 'test_user_15', isSuper: false },  // Malik
+  ];
+
+  let autoLikeCount = 0;
+  for (const { uid, isSuper } of AUTO_LIKERS) {
+    const liker = await prisma.user.findUnique({ where: { firebaseUid: uid } });
+    if (liker) {
+      await prisma.like.upsert({
+        where: { senderId_receiverId: { senderId: liker.id, receiverId: demo.id } },
+        update: { isSuper },
+        create: { senderId: liker.id, receiverId: demo.id, isSuper },
+      });
+      autoLikeCount++;
+    }
+  }
+  console.log(`\n  ✓ ${autoLikeCount} pre-seeded reciprocal like(s) → demo_user`);
+  console.log('    (Like Sofia / James / Priya / Aisha / Isabelle / Malik to trigger a real match)');
+
+  // 4. Clear stale likes FROM demo_user so all profiles appear in feed
   const deleted = await prisma.like.deleteMany({ where: { senderId: demo.id } });
   if (deleted.count > 0) {
     console.log(`\n  ↺ Cleared ${deleted.count} stale like(s) from demo_user`);
