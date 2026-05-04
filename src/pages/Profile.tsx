@@ -6,7 +6,7 @@ import {
   Edit3, Settings, MapPin, Briefcase, GraduationCap,
   Heart, X, ChevronRight, Ruler, BadgeCheck,
   LogOut, ShieldCheck, Clock, Crown, Zap, Video, Trash2, Play, Star,
-  Plus, Camera, Users, Sparkles,
+  Plus, Camera, Users, Sparkles, Pencil,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -16,6 +16,7 @@ import type { User } from '../types';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import VideoRecorder from '../components/VideoRecorder';
+import VideoEditorModal from '../components/VideoEditorModal';
 import { calculateAge, normalizeAssetUrl } from '../utils/helpers';
 
 const INTERESTS = [
@@ -99,6 +100,7 @@ function VideoManager({
   onUpload,
   onDelete,
   onSetActive,
+  onEdit,
   uploading,
   initialMode,
 }: {
@@ -107,6 +109,7 @@ function VideoManager({
   onUpload: (file: File) => void;
   onDelete: (url: string) => void;
   onSetActive: (url: string) => void;
+  onEdit: (url: string) => void;
   uploading: boolean;
   initialMode?: 'record' | 'upload';
 }) {
@@ -267,6 +270,13 @@ function VideoManager({
                   )}
                   <div className="flex-1" />
                   <button
+                    onClick={() => onEdit(url)}
+                    className="rounded-full p-2 text-white/60 hover:bg-purple-500/20 hover:text-purple-300 transition"
+                    title="Edit video"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => onDelete(url)}
                     className="rounded-full p-2 text-white/60 hover:bg-red-500/20 hover:text-red-300 transition"
                   >
@@ -331,6 +341,7 @@ function EditSheet({
   );
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<string | null>(null);
 
   const {
     register,
@@ -457,6 +468,7 @@ function EditSheet({
   const maxDist = watch('maxDistance');
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -496,6 +508,7 @@ function EditSheet({
             onUpload={handleVideoUpload}
             onDelete={handleDeleteVideo}
             onSetActive={handleSetActive}
+            onEdit={(url) => setEditingVideo(url)}
             uploading={uploading}
             initialMode={initialVideoMode}
           />
@@ -658,6 +671,24 @@ function EditSheet({
     </div>
     </motion.div>
   </motion.div>
+
+  <AnimatePresence>
+    {editingVideo && (
+      <VideoEditorModal
+        videoUrl={editingVideo}
+        firstName={user.firstName}
+        bio={user.bio ?? undefined}
+        interests={user.interests}
+        onClose={() => setEditingVideo(null)}
+        onSave={(blob) => {
+          setEditingVideo(null);
+          const file = new File([blob], `edited-${Date.now()}.webm`, { type: 'video/webm' });
+          handleVideoUpload(file);
+        }}
+      />
+    )}
+  </AnimatePresence>
+  </>
   );
 }
 

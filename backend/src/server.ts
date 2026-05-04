@@ -17,6 +17,7 @@ import messageRoutes from './routes/messages';
 import uploadRoutes from './routes/upload';
 import safetyRoutes from './routes/safety';
 import premiumRoutes, { handleStripeWebhook } from './routes/premium';
+import aiRoutes from './routes/ai';
 
 const app = express();
 const httpServer = createServer(app);
@@ -49,6 +50,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/safety', safetyRoutes);
 app.use('/api/premium', premiumRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });

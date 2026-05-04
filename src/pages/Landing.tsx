@@ -19,10 +19,10 @@ const BUBBLES = [
   { src: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&h=300&fit=crop&crop=faces", size: 68,  x: "35%", y: "55%", delay: 2.8,  dur: 6.5, z: 0.45, drift: 10 },
 ];
 
-const stats = [
-  { label: "Active Members", value: "120k+" },
-  { label: "Daily Matches",  value: "8,200" },
-  { label: "Success Stories", value: "15k+" },
+const pillars = [
+  { icon: "🎥", label: "Real video profiles" },
+  { icon: "🧠", label: "Behavior-based matching" },
+  { icon: "⚡", label: "No swiping — just scroll" },
 ];
 
 const features = [
@@ -173,7 +173,7 @@ export default function Landing() {
             transition={{ delay: 0.2 }}
             className="inline-flex items-center gap-2 text-xs tracking-widest uppercase text-pink-400/80 bg-pink-900/20 border border-pink-500/30 rounded-full px-4 py-1.5 mb-6"
           >
-            <Sparkles className="w-3 h-3" /> Smart matching · Real connections
+            <Sparkles className="w-3 h-3" /> Video-first · Now in early access
           </motion.p>
 
           <motion.h1
@@ -187,6 +187,9 @@ export default function Landing() {
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-rose-400">
               energy.
             </span>
+            <span className="block mt-3 text-3xl md:text-4xl font-semibold text-white/40 tracking-normal">
+              No swiping. Just scroll.
+            </span>
           </motion.h1>
 
           <motion.p
@@ -195,7 +198,7 @@ export default function Landing() {
             transition={{ delay: 0.5 }}
             className="mt-5 text-lg text-white/55 max-w-lg mx-auto"
           >
-            Smart matching, safety tools, and playful prompts that cut the awkwardness.
+            Watch real video profiles. Like what feels right. Match based on how you actually engage.
           </motion.p>
 
           <motion.div
@@ -206,7 +209,7 @@ export default function Landing() {
           >
             <Link to="/signup"
               className="px-7 py-3.5 rounded-2xl bg-pink-600 hover:bg-pink-500 transition font-semibold shadow-xl shadow-pink-600/35 text-base">
-              Create free account
+              Start exploring
             </Link>
             <Link to="/login"
               className="px-7 py-3.5 rounded-2xl border border-white/15 hover:bg-white/5 transition text-white/70 hover:text-white text-base">
@@ -214,17 +217,17 @@ export default function Landing() {
             </Link>
           </motion.div>
 
-          {/* Stats */}
+          {/* Pillars */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.85 }}
-            className="mt-12 flex flex-wrap justify-center gap-8"
+            className="mt-12 flex flex-wrap justify-center gap-3"
           >
-            {stats.map((s) => (
-              <div key={s.label} className="text-center">
-                <div className="text-2xl font-bold text-white">{s.value}</div>
-                <div className="text-xs text-white/40 mt-0.5">{s.label}</div>
+            {pillars.map((p) => (
+              <div key={p.label} className="flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/[0.04] text-sm text-white/70">
+                <span>{p.icon}</span>
+                <span>{p.label}</span>
               </div>
             ))}
           </motion.div>
@@ -285,11 +288,11 @@ export default function Landing() {
           viewport={{ once: true }}
           className="rounded-3xl border border-white/8 bg-gradient-to-br from-pink-600/20 to-rose-900/20 p-12 md:p-20"
         >
-          <h2 className="text-3xl md:text-5xl font-bold mb-4">Your person is already here.</h2>
-          <p className="text-white/45 mb-10 text-lg">Join over 120k members who took the leap.</p>
+          <h2 className="text-3xl md:text-5xl font-bold mb-4">Be one of the first.</h2>
+          <p className="text-white/45 mb-10 text-lg">Early access — video-first dating, smarter matches, no swiping.</p>
           <Link to="/signup"
             className="inline-flex items-center gap-2 px-9 py-4 rounded-2xl bg-pink-600 hover:bg-pink-500 font-semibold text-lg shadow-2xl shadow-pink-600/40 transition">
-            Start for free <Heart className="w-4 h-4" />
+            Start exploring <Heart className="w-4 h-4" />
           </Link>
         </motion.div>
       </section>
