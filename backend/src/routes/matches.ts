@@ -9,6 +9,7 @@ const router = express.Router();
 const LikeSchema = z.object({
   receiverId: z.string().min(1),
   isSuper: z.boolean().optional().default(false),
+  signalType: z.enum(['INTRIGUED', 'STIMULATING', 'HIGH_VALUE', 'ALIGNED']).optional(),
 });
 
 // Like a user
@@ -19,7 +20,8 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
       return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
     }
 
-    const { receiverId, isSuper } = parsed.data;
+    const { receiverId, isSuper, signalType } = parsed.data;
+    const effectiveIsSuper = isSuper || signalType === 'HIGH_VALUE' || signalType === 'ALIGNED';
 
     const currentUser = await prisma.user.findUnique({
       where: { firebaseUid: req.user!.uid },
@@ -34,7 +36,7 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     }
 
     // Enforce daily like limit for free users (super likes have their own limit)
-    if (!currentUser.isPremium && !isSuper) {
+    if (!currentUser.isPremium && !effectiveIsSuper) {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const likesToday = await prisma.like.count({
@@ -49,8 +51,8 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     // Upsert like (handles duplicate swipes gracefully)
     const like = await prisma.like.upsert({
       where: { senderId_receiverId: { senderId: currentUser.id, receiverId } },
-      update: { isSuper },
-      create: { senderId: currentUser.id, receiverId, isSuper },
+      update: { isSuper: effectiveIsSuper, signalType: signalType ?? null },
+      create: { senderId: currentUser.id, receiverId, isSuper: effectiveIsSuper, signalType: signalType ?? null },
     });
 
     // Check for mutual like
@@ -73,6 +75,14 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
       // Fire-and-forget push notifications to both users
       notifyNewMatch(receiverId, currentUser.firstName).catch(() => {});
       notifyNewMatch(currentUser.id, match.user1Id === currentUser.id ? match.user2.firstName : match.user1.firstName).catch(() => {});
+
+      // In-app notifications for the bell
+      prisma.notification.createMany({
+        data: [
+          { userId: receiverId,      type: 'NEW_MATCH', actorId: currentUser.id, matchId: match.id },
+          { userId: currentUser.id,  type: 'NEW_MATCH', actorId: receiverId,     matchId: match.id },
+        ],
+      }).catch(() => {});;
     }
 
     res.json({ like, match, isMatch: !!match });

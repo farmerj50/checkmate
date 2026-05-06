@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { Heart, User, Compass, Crown } from 'lucide-react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Home, Search, PlusSquare, Heart, Bell } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,11 +10,10 @@ function useUnreadCount() {
   const { dbUser } = useAuth();
   const [count, setCount] = useState(0);
   const socketRef = useRef<Awaited<ReturnType<typeof getSocket>> | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     if (!dbUser) return;
-
-    // Initial load
     api
       .get<{ matches: Array<{ lastMessage?: { isRead: boolean; senderId: string } | null }> }>('/matches')
       .then((data) => {
@@ -25,29 +24,18 @@ function useUnreadCount() {
       })
       .catch(() => {});
 
-    // Increment via socket when a new message arrives while on another tab
     let mounted = true;
     getSocket().then((socket) => {
       if (!mounted) return;
       socketRef.current = socket;
-      // message:badge is emitted only to the receiver's personal room
-      socket.on('message:badge', () => {
-        setCount((n) => n + 1);
-      });
+      socket.on('message:badge', () => setCount((n) => n + 1));
     });
-
-    return () => {
-      mounted = false;
-      socketRef.current?.off('message:badge');
-    };
+    return () => { mounted = false; socketRef.current?.off('message:badge'); };
   }, [dbUser]);
 
-  // Reset when user navigates to matches/chat
-  const location = useLocation();
   useEffect(() => {
+    if (!dbUser) return;
     if (location.pathname.startsWith('/matches') || location.pathname.startsWith('/chat')) {
-      // Re-fetch to get accurate count after reading messages
-      if (!dbUser) return;
       api
         .get<{ matches: Array<{ lastMessage?: { isRead: boolean; senderId: string } | null }> }>('/matches')
         .then((data) => {
@@ -63,43 +51,102 @@ function useUnreadCount() {
   return count;
 }
 
+function useNotificationCount() {
+  const { dbUser } = useAuth();
+  const [count, setCount] = useState(0);
+  const socketRef = useRef<Awaited<ReturnType<typeof getSocket>> | null>(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!dbUser) return;
+    api.get<{ count: number }>('/social/notifications/unread-count').then((d) => setCount(d.count)).catch(() => {});
+
+    let mounted = true;
+    getSocket().then((socket) => {
+      if (!mounted) return;
+      socketRef.current = socket;
+      socket.on('notification:new', () => setCount((n) => n + 1));
+    });
+    return () => { mounted = false; socketRef.current?.off('notification:new'); };
+  }, [dbUser]);
+
+  useEffect(() => {
+    if (location.pathname === '/notifications') {
+      setCount(0);
+    }
+  }, [location.pathname]);
+
+  return count;
+}
+
 const Navigation: React.FC = () => {
-  const unread = useUnreadCount();
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const unread     = useUnreadCount();
+  const notifCount = useNotificationCount();
+
+  // These pages use their own full-screen layout with a left sidebar
+  if (location.pathname === '/explore' || location.pathname === '/studio') return null;
 
   const navItems = [
-    { path: '/discover', icon: Compass, label: 'Discover' },
-    { path: '/matches', icon: Heart, label: 'Matches', badge: unread },
-    { path: '/premium', icon: Crown, label: 'Premium' },
-    { path: '/profile', icon: User, label: 'Profile' },
+    { path: '/home',          icon: Home,       label: 'Home',          badge: 0 },
+    { path: '/explore',       icon: Search,     label: 'Explore',       badge: 0 },
+    { path: '/matches',       icon: Heart,      label: 'Matches',       badge: unread },
+    { path: '/notifications', icon: Bell,       label: 'Alerts',        badge: notifCount },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-2 z-50">
-      <div className="flex justify-around items-center max-w-md mx-auto">
-        {navItems.map(({ path, icon: Icon, label, badge }) => (
-          <NavLink
-            key={path}
-            to={path}
-            className={({ isActive }) =>
-              `flex flex-col items-center py-2 px-3 rounded-lg transition-colors ${
-                isActive ? 'text-pink-500' : 'text-gray-500 hover:text-gray-700'
-              }`
-            }
-          >
+    <nav className="fixed bottom-0 left-0 right-0 bg-[#050508]/95 backdrop-blur-xl border-t border-white/8 px-2 py-2 z-50">
+      <div className="flex justify-around items-center max-w-[720px] mx-auto">
+        {/* First 2 tabs */}
+        {navItems.slice(0, 2).map(({ path, icon: Icon, label, badge }) => (
+          <NavLink key={path} to={path} className={({ isActive }) =>
+            `flex flex-col items-center py-1.5 px-4 rounded-2xl transition-all ${isActive ? 'text-[#ff4d8d]' : 'text-white/40 hover:text-white/70'}`
+          }>
             {({ isActive }) => (
               <>
-                <motion.div
-                  whileTap={{ scale: 0.9 }}
-                  className={`relative p-2 rounded-full ${isActive ? 'bg-pink-100' : ''}`}
-                >
-                  <Icon className="w-6 h-6" />
-                  {badge != null && badge > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-pink-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                <motion.div whileTap={{ scale: 0.85 }} className={`relative p-2 rounded-xl ${isActive ? 'bg-[#ff4d8d]/15' : ''}`}>
+                  <Icon className="w-5 h-5" />
+                  {badge > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] bg-[#ff4d8d] text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1">
                       {badge > 99 ? '99+' : badge}
                     </span>
                   )}
                 </motion.div>
-                <span className="text-xs mt-1 font-medium">{label}</span>
+                <span className="text-[10px] font-medium mt-0.5">{label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
+
+        {/* Center Create button */}
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={() => navigate('/create')}
+          className={`flex flex-col items-center py-1.5 px-3 rounded-2xl transition-all ${location.pathname === '/create' ? 'text-[#ff4d8d]' : 'text-white/40 hover:text-white/70'}`}
+        >
+          <div className={`relative p-2 rounded-xl ${location.pathname === '/create' ? 'bg-[#ff4d8d]/15' : ''}`}>
+            <PlusSquare className="w-5 h-5" />
+          </div>
+          <span className="text-[10px] font-medium mt-0.5">Create</span>
+        </motion.button>
+
+        {/* Last 2 tabs */}
+        {navItems.slice(2).map(({ path, icon: Icon, label, badge }) => (
+          <NavLink key={path} to={path} className={({ isActive }) =>
+            `flex flex-col items-center py-1.5 px-4 rounded-2xl transition-all ${isActive ? 'text-[#ff4d8d]' : 'text-white/40 hover:text-white/70'}`
+          }>
+            {({ isActive }) => (
+              <>
+                <motion.div whileTap={{ scale: 0.85 }} className={`relative p-2 rounded-xl ${isActive ? 'bg-[#ff4d8d]/15' : ''}`}>
+                  <Icon className="w-5 h-5" />
+                  {badge > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] bg-[#ff4d8d] text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1">
+                      {badge > 99 ? '99+' : badge}
+                    </span>
+                  )}
+                </motion.div>
+                <span className="text-[10px] font-medium mt-0.5">{label}</span>
               </>
             )}
           </NavLink>

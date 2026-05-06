@@ -74,6 +74,11 @@ export interface Like {
   receiver: User;
 }
 
+export type SignalType = 'INTRIGUED' | 'STIMULATING' | 'HIGH_VALUE' | 'ALIGNED';
+
+export interface UserPrompt { question: string; answer: string; }
+export interface DailyPrompt { id: string; question: string; category: string; responseCount?: number; }
+
 export interface SwipeCard {
   user: User;
   distance: number;
@@ -85,6 +90,47 @@ export interface SwipeCard {
     activity: number;
   };
   reason?: string;
+  prompt?: UserPrompt | null;
+}
+
+// ── Social ────────────────────────────────────────────────────────────────────
+
+export interface Post {
+  id: string;
+  authorId: string;
+  author: Pick<User, 'id' | 'firstName' | 'profilePictures' | 'isVerified'>;
+  mediaUrl: string;
+  mediaType: 'VIDEO' | 'IMAGE';
+  caption?: string;
+  likeCount: number;
+  commentCount: number;
+  isLikedByMe: boolean;
+  createdAt: string;
+}
+
+export interface SocialComment {
+  id: string;
+  postId: string;
+  authorId: string;
+  author: Pick<User, 'id' | 'firstName' | 'profilePictures'>;
+  content: string;
+  createdAt: string;
+}
+
+export interface SocialNotification {
+  id: string;
+  type: 'NEW_FOLLOWER' | 'POST_LIKED' | 'POST_COMMENTED' | 'NEW_MATCH';
+  actor?: Pick<User, 'id' | 'firstName' | 'profilePictures'>;
+  postId?: string;
+  matchId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface FollowStatus {
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
 }
 
 export interface MatchingAlgorithmResult {

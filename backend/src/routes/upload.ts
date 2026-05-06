@@ -226,6 +226,44 @@ router.put('/photos/reorder', authenticateToken, async (req: AuthenticatedReques
   }
 });
 
+// ── POST /api/upload/post-media — video OR image for social posts ─────────────
+const postMediaUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, VIDEOS_DIR),
+    filename: (req: any, file, cb) => {
+      const uid = (req.user?.uid ?? 'unknown').replace(/[^a-zA-Z0-9]/g, '_');
+      let ext = 'mp4';
+      if (file.mimetype === 'video/webm') ext = 'webm';
+      else if (file.mimetype === 'video/quicktime') ext = 'mov';
+      else if (file.mimetype.includes('jpeg') || file.mimetype.includes('jpg')) ext = 'jpg';
+      else if (file.mimetype.includes('png')) ext = 'png';
+      else if (file.mimetype.includes('webp')) ext = 'webp';
+      else if (file.mimetype.includes('gif')) ext = 'gif';
+      cb(null, `post_${uid}_${Date.now()}.${ext}`);
+    },
+  }),
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith('video/') && !file.mimetype.startsWith('image/')) {
+      cb(new Error('Only video or image files are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+router.post('/post-media', authenticateToken, postMediaUpload.single('media'), async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file provided' });
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const url = `${baseUrl}/uploads/videos/${req.file.filename}`;
+    res.json({ url });
+  } catch (err: any) {
+    console.error('Post media upload error:', err);
+    res.status(500).json({ error: err.message ?? 'Upload failed' });
+  }
+});
+
 // ── POST /api/upload/video-message — video attached to a chat message ─────────
 router.post('/video-message', authenticateToken, videoUpload.single('video'), async (req: AuthenticatedRequest, res) => {
   try {

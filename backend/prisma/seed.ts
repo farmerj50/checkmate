@@ -564,6 +564,81 @@ async function main() {
     console.log(`\n  ↺ Cleared ${deleted.count} stale like(s) from demo_user`);
   }
 
+  // 5. Seed fake social posts from test users
+  const POST_DATA = [
+    { uid: 'test_user_1',  mediaUrl: V[0], caption: 'Golden hour from the rooftop 🌅' },
+    { uid: 'test_user_2',  mediaUrl: V[1], caption: 'New recipe dropping this weekend 🍳' },
+    { uid: 'test_user_3',  mediaUrl: V[2], caption: 'Morning run ✔️ Coffee now ☕' },
+    { uid: 'test_user_4',  mediaUrl: V[3], caption: 'Studio session. Beats loading... 🎧' },
+    { uid: 'test_user_5',  mediaUrl: V[4], caption: 'Yoga flow to start the week right 🧘' },
+    { uid: 'test_user_6',  mediaUrl: V[5], caption: 'Road trip vibes only 🚗' },
+    { uid: 'test_user_7',  mediaUrl: V[6], caption: 'Working on something big. Stay tuned.' },
+    { uid: 'test_user_8',  mediaUrl: V[7], caption: 'Throwback to the best hike ever 🏔️' },
+    { uid: 'test_user_1',  mediaUrl: V[8], caption: 'City lights never get old ✨' },
+    { uid: 'test_user_3',  mediaUrl: V[2], caption: 'Sunday reset 🌿' },
+    { uid: 'demo_user',    mediaUrl: V[0], caption: 'First post on this app — let\'s go 🔥' },
+  ];
+
+  let postCount = 0;
+  for (const { uid, mediaUrl, caption } of POST_DATA) {
+    const author = uid === 'demo_user' ? demo : await prisma.user.findUnique({ where: { firebaseUid: uid } });
+    if (!author) continue;
+    await prisma.post.upsert({
+      where: { id: `seed-post-${uid}-${postCount}` },
+      update: { caption },
+      create: { id: `seed-post-${uid}-${postCount}`, authorId: author.id, mediaUrl, mediaType: 'VIDEO', caption },
+    });
+    postCount++;
+  }
+  console.log(`\n  ✓ ${postCount} fake posts seeded for social feed testing`);
+
+  // Add some post likes so feed isn't empty
+  const allPosts = await prisma.post.findMany({ select: { id: true, authorId: true } });
+  for (const post of allPosts.slice(0, 6)) {
+    if (post.authorId !== demo.id) {
+      await prisma.postLike.upsert({
+        where: { postId_userId: { postId: post.id, userId: demo.id } },
+        update: {},
+        create: { postId: post.id, userId: demo.id },
+      }).catch(() => {});
+    }
+  }
+
+  // 6. Daily prompts (one active)
+  await prisma.dailyPrompt.createMany({
+    data: [
+      { question: "What's one thing most people misunderstand about you?", isActive: true },
+      { question: 'Describe your perfect Sunday in 6 words', isActive: false },
+      { question: "What would you do if you weren't afraid?", isActive: false },
+      { question: 'Your most controversial opinion on something minor', isActive: false },
+      { question: "The skill you're secretly proud of", isActive: false },
+    ],
+    skipDuplicates: true,
+  });
+  console.log('\n  ✓ Daily prompts seeded (1 active)');
+
+  // 7. User prompts for 5 test users
+  const PROMPT_SEEDS = [
+    { uid: 'test_user_1',  question: "What's one thing most people misunderstand about you?", answer: "That I'm cold — I'm just selective." },
+    { uid: 'test_user_2',  question: 'Your most controversial opinion on something minor', answer: 'Pineapple on pizza is objectively correct.' },
+    { uid: 'test_user_5',  question: "The skill you're secretly proud of", answer: 'I can read a room within 30 seconds of walking in.' },
+    { uid: 'test_user_8',  question: 'Describe your perfect Sunday in 6 words', answer: 'Brunch, books, zero obligations, golden hour.' },
+    { uid: 'test_user_14', question: "What would you do if you weren't afraid?", answer: 'Move to a city where nobody knows my name.' },
+  ];
+  let promptCount = 0;
+  for (const { uid, question, answer } of PROMPT_SEEDS) {
+    const user = await prisma.user.findUnique({ where: { firebaseUid: uid } });
+    if (user) {
+      await prisma.userPrompt.upsert({
+        where: { userId: user.id },
+        update: { question, answer },
+        create: { userId: user.id, question, answer },
+      });
+      promptCount++;
+    }
+  }
+  console.log(`  ✓ ${promptCount} user prompts seeded`);
+
   console.log(`\n✅ Seed complete — demo + ${TEST_USERS.length} test profiles ready.\n`);
   console.log('Coverage:');
   console.log('  lookingFor   RELATIONSHIP ×8, CASUAL ×4, FRIENDSHIP ×2, NETWORKING ×2');

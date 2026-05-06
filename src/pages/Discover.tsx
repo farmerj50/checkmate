@@ -2,16 +2,17 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Heart, X, Star, MapPin, BadgeCheck,
+  Heart, X, MapPin, BadgeCheck,
   Settings, Sparkles, Info, Crown, RefreshCw,
   Volume2, VolumeX, ChevronUp, Video, Camera,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PremiumGate from '../components/PremiumGate';
+import SignalButtons from '../components/SignalButtons';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { calculateAge } from '../utils/helpers';
-import type { SwipeCard as SwipeCardType, Match, User } from '../types';
+import type { SwipeCard as SwipeCardType, Match, User, SignalType } from '../types';
 
 // Ken Burns classes for static photos
 const KB_CLASSES = ['kb1', 'kb2', 'kb3', 'kb4'];
@@ -68,30 +69,40 @@ function MatchOverlay({ match, currentUser, onClose, onMessage }: {
   );
 }
 
+// Signal feedback config
+const SIGNAL_FEEDBACK: Record<SignalType, { color: string; message: string; emoji: string }> = {
+  INTRIGUED:   { color: '#ff4d8d', message: 'Something caught your attention.', emoji: '🔥' },
+  STIMULATING: { color: '#06b6d4', message: 'Mind engaged.',                    emoji: '🧠' },
+  HIGH_VALUE:  { color: '#f59e0b', message: 'You recognized something rare.',    emoji: '💎' },
+  ALIGNED:     { color: '#22c55e', message: 'Your instincts are aligned.',       emoji: '🎯' },
+};
+
 // ── Feed Card ─────────────────────────────────────────────────────────────────
 function FeedCard({
-  card, isActive, superLikesRemaining, showDebug,
-  onLike, onPass, onSuperLike,
+  card, isActive, showDebug,
+  onSignal, onPass, onTransitionChange,
 }: {
   card: SwipeCardType;
   isActive: boolean;
-  superLikesRemaining: number;
   showDebug: boolean;
-  onLike: () => void;
+  onSignal: (type: SignalType) => void;
   onPass: () => void;
-  onSuperLike: () => void;
+  onTransitionChange?: (v: boolean) => void;
 }) {
   const { user, distance, compatibilityScore, commonInterests, scoreBreakdown } = card;
 
-  // Build ordered media array: active video first, then photos
+  // Build ordered media array: active video first, then photos, with optional prompt slide at index 1
   const mediaItems = useMemo(() => {
-    const items: { type: 'video' | 'image'; url: string }[] = [];
+    const items: ({ type: 'video' | 'image'; url: string } | { type: 'prompt'; question: string; answer: string })[] = [];
     if (user.profileVideo) items.push({ type: 'video', url: user.profileVideo });
     for (const url of (user.profilePictures ?? [])) {
       if (url) items.push({ type: 'image', url });
     }
+    if (card.prompt) {
+      items.splice(1, 0, { type: 'prompt', question: card.prompt.question, answer: card.prompt.answer });
+    }
     return items;
-  }, [user.profileVideo, user.profilePictures]);
+  }, [user.profileVideo, user.profilePictures, card.prompt]);
 
   const [mediaIndex, setMediaIndex] = useState(0);
   const [muted, setMuted] = useState(true);
@@ -107,7 +118,33 @@ function FeedCard({
 
   const currentMedia = mediaItems[mediaIndex];
   const isVideoSlide = currentMedia?.type === 'video';
+  const isPromptSlide = currentMedia?.type === 'prompt';
   const hasMedia = mediaItems.length > 0;
+
+  const [signalFeedback, setSignalFeedback] = useState<{ type: SignalType; color: string; message: string; emoji: string } | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  function getSignalMessage(type: SignalType): string {
+    return {
+      INTRIGUED:   'Something caught your eye.',
+      STIMULATING: 'Mind engaged.',
+      HIGH_VALUE:  'You recognized something rare.',
+      ALIGNED:     'Your instincts are aligned.',
+    }[type];
+  }
+
+  function handleSignal(type: SignalType) {
+    const fb = SIGNAL_FEEDBACK[type];
+    setIsTransitioning(true);
+    onTransitionChange?.(true);
+    setTimeout(() => setSignalFeedback({ type, ...fb }), 120);
+    setTimeout(() => setSignalFeedback(null), 650);
+    setTimeout(() => {
+      setIsTransitioning(false);
+      onTransitionChange?.(false);
+      fireAction('like', () => onSignal(type));
+    }, 850);
+  }
 
   // Reset when card changes
   useEffect(() => {
@@ -194,7 +231,15 @@ function FeedCard({
   const lf = LOOKING_FOR_META[user.lookingFor];
 
   return (
-    <div className="relative w-full h-full bg-zinc-900 select-none overflow-hidden">
+    <motion.div
+      className="relative w-full h-full bg-zinc-900 select-none overflow-hidden"
+      animate={{
+        scale: isTransitioning ? 0.975 : 1,
+        opacity: isTransitioning ? 0.92 : 1,
+        filter: isTransitioning ? 'brightness(0.9)' : 'brightness(1)',
+      }}
+      transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+    >
 
       {/* ── Background media ── */}
 
@@ -206,7 +251,7 @@ function FeedCard({
       )}
 
       {/* Photo slide */}
-      {isVideoSlide ? null : currentMedia ? (
+      {isVideoSlide || isPromptSlide ? null : currentMedia && currentMedia.type === 'image' ? (
         <AnimatePresence mode="wait">
           <motion.img
             key={currentMedia.url}
@@ -220,6 +265,22 @@ function FeedCard({
           />
         </AnimatePresence>
       ) : null}
+
+      {/* Prompt slide — intentional pause moment */}
+      {isPromptSlide && currentMedia.type === 'prompt' && (
+        <motion.div
+          key="prompt-slide"
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+          className="absolute inset-0 bg-gradient-to-br from-[#1a0a2e] to-[#0a0a1a] flex flex-col items-center justify-center px-10 text-center z-[5]"
+        >
+          <p className="text-white/30 text-[10px] font-semibold uppercase tracking-widest mb-6">Asked</p>
+          <p className="text-white/50 text-sm mb-5 italic">"{currentMedia.question}"</p>
+          <p className="text-white text-2xl font-bold leading-snug mb-6">"{currentMedia.answer}"</p>
+          <p className="text-white/30 text-xs">Send a signal based on this ↓</p>
+        </motion.div>
+      )}
 
       {/* Photo shown behind video while buffering */}
       {isVideoSlide && !videoReady && (
@@ -327,6 +388,8 @@ function FeedCard({
                   >
                     {item.type === 'video'
                       ? <Video className="w-3 h-3 text-white" />
+                      : item.type === 'prompt'
+                      ? <span className="text-[9px] leading-none">💬</span>
                       : <Camera className="w-3 h-3 text-white" />}
                   </span>
                 ))}
@@ -345,7 +408,7 @@ function FeedCard({
       </div>
 
       {/* ── Bottom overlay: info + action buttons ── */}
-      <div className="absolute bottom-0 inset-x-0 px-4 pb-5 flex items-end gap-3 z-30">
+      <div className="absolute bottom-0 inset-x-0 px-4 pb-44 flex items-end gap-3 z-30">
 
         {/* Left: info column */}
         <div className="flex-1 min-w-0">
@@ -397,10 +460,8 @@ function FeedCard({
           </button>
         </div>
 
-        {/* Right: action stack */}
+        {/* Right: mute + pass */}
         <div className="flex flex-col items-center gap-3 pb-1 flex-shrink-0">
-
-          {/* Mute/unmute — only when on video slide */}
           {isVideoSlide && (
             <motion.button
               whileTap={{ scale: 0.82 }}
@@ -412,50 +473,19 @@ function FeedCard({
                 : <Volume2 className="w-4 h-4 text-white" />}
             </motion.button>
           )}
-
-          {/* Super Like */}
-          <div className="flex flex-col items-center gap-0.5">
-            <motion.button
-              whileTap={{ scale: 0.82 }}
-              onClick={() => superLikesRemaining > 0 && fireAction('super', onSuperLike)}
-              disabled={superLikesRemaining === 0}
-              className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors ${
-                superLikesRemaining === 0
-                  ? 'bg-zinc-800/70 border border-zinc-700/50'
-                  : 'bg-zinc-900/80 border border-white/20 backdrop-blur-sm'
-              }`}
-            >
-              <Star className={`w-5 h-5 ${superLikesRemaining === 0 ? 'text-zinc-600' : 'text-yellow-300'}`} />
-            </motion.button>
-            <span className="text-white/35 text-[10px] font-medium">
-              {superLikesRemaining > 0 ? superLikesRemaining : '—'}
-            </span>
-          </div>
-
-          {/* Like */}
-          <div className="flex flex-col items-center gap-0.5">
-            <motion.button
-              whileTap={{ scale: 0.82 }}
-              onClick={() => fireAction('like', onLike)}
-              className="w-14 h-14 rounded-full bg-pink-500 flex items-center justify-center shadow-lg shadow-pink-500/40"
-            >
-              <Heart className="w-7 h-7 text-white fill-white" />
-            </motion.button>
-            <span className="text-white/35 text-[10px] font-medium">Like</span>
-          </div>
-
-          {/* Pass */}
-          <div className="flex flex-col items-center gap-0.5">
-            <motion.button
-              whileTap={{ scale: 0.82 }}
-              onClick={() => fireAction('pass', onPass)}
-              className="w-12 h-12 rounded-full bg-zinc-900/80 border border-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg"
-            >
-              <X className="w-5 h-5 text-white/70" />
-            </motion.button>
-            <span className="text-white/35 text-[10px] font-medium">Pass</span>
-          </div>
+          <motion.button
+            whileTap={{ scale: 0.82 }}
+            onClick={() => fireAction('pass', onPass)}
+            className="w-12 h-12 rounded-full bg-zinc-900/80 border border-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg"
+          >
+            <X className="w-5 h-5 text-white/70" />
+          </motion.button>
         </div>
+      </div>
+
+      {/* ── Signal buttons — full-width at bottom of card ── */}
+      <div className="absolute bottom-0 left-0 right-0 px-4 pb-4 z-30">
+        <SignalButtons onSignal={handleSignal} disabled={!!signalFeedback || isTransitioning} />
       </div>
 
       {/* ── Expanded profile sheet (slides up from bottom) ── */}
@@ -572,6 +602,53 @@ function FeedCard({
         )}
       </AnimatePresence>
 
+      {/* ── Signal feedback overlay ── */}
+      <AnimatePresence>
+        {signalFeedback && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: [1, 1.02, 1] }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="absolute inset-0 z-40 flex flex-col items-center justify-center rounded-3xl pointer-events-none"
+            style={{ background: `${signalFeedback.color}18` }}
+          >
+            <div
+              className="w-20 h-20 rounded-full flex items-center justify-center mb-4"
+              style={{ background: `${signalFeedback.color}30`, border: `2px solid ${signalFeedback.color}` }}
+            >
+              <span className="text-3xl">{signalFeedback.emoji}</span>
+            </div>
+            <p className="text-white font-semibold text-lg tracking-tight">{signalFeedback.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Signal pill feedback ── */}
+      <AnimatePresence>
+        {signalFeedback && (
+          <motion.div
+            className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.2 }}
+          >
+            <motion.div
+              className="px-6 py-3 rounded-full bg-black/60 backdrop-blur-lg border border-white/10 shadow-2xl"
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
+              <p className="text-white text-sm font-semibold tracking-wide">
+                {getSignalMessage(signalFeedback.type)}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Action flash overlays ── */}
       <AnimatePresence>
         {flash === 'like' && (
@@ -654,7 +731,7 @@ function FeedCard({
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -669,27 +746,25 @@ export default function Discover() {
   const [loading, setLoading]         = useState(true);
   const [newMatch, setNewMatch]       = useState<(Match & { otherUser: User }) | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [superLikesRemaining, setSuperLikesRemaining] = useState(3);
   const [premiumGate, setPremiumGate] = useState<{ open: boolean; reason: 'likes' | 'super_likes' }>({ open: false, reason: 'likes' });
   const [refreshing, setRefreshing]   = useState(false);
   const [debugMode, setDebugMode]     = useState(false);
 
-  const feedAreaRef  = useRef<HTMLDivElement>(null);
-  const touchStartY  = useRef(0);
-  const wheelCooling = useRef(false);
+  const feedAreaRef    = useRef<HTMLDivElement>(null);
+  const touchStartY    = useRef(0);
+  const wheelCooling   = useRef(false);
+  const blockSwipeRef  = useRef(false);
 
   // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       try {
-        const [discoverData, profileData, superData] = await Promise.all([
+        const [discoverData, profileData] = await Promise.all([
           api.get<{ matches: SwipeCardType[] }>('/users/discover'),
           api.get<{ user: User }>('/users/profile'),
-          api.get<{ remaining: number }>('/users/super-likes/remaining'),
         ]);
         setCards(discoverData.matches);
         setCurrentUser(profileData.user);
-        setSuperLikesRemaining(superData.remaining);
       } catch {
         toast.error('Could not load profiles');
       } finally {
@@ -702,11 +777,13 @@ export default function Discover() {
   const visibleCards = cards.filter(c => !dismissed.has(c.user.id));
 
   const goNext = useCallback(() => {
+    if (blockSwipeRef.current) return;
     setDirection(1);
     setViewIndex(i => Math.min(i + 1, Math.max(0, visibleCards.length - 1)));
   }, [visibleCards.length]);
 
   const goPrev = useCallback(() => {
+    if (blockSwipeRef.current) return;
     setDirection(-1);
     setViewIndex(i => Math.max(0, i - 1));
   }, []);
@@ -749,12 +826,8 @@ export default function Discover() {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [discoverData, superData] = await Promise.all([
-        api.get<{ matches: SwipeCardType[] }>('/users/discover'),
-        api.get<{ remaining: number }>('/users/super-likes/remaining'),
-      ]);
+      const discoverData = await api.get<{ matches: SwipeCardType[] }>('/users/discover');
       setCards(discoverData.matches);
-      setSuperLikesRemaining(superData.remaining);
       setDismissed(new Set());
       setViewIndex(0);
     } catch {
@@ -769,11 +842,11 @@ export default function Discover() {
     setDismissed(prev => new Set([...prev, cardId]));
   }, []);
 
-  const handleLike = useCallback(async (card: SwipeCardType) => {
+  const handleSignal = useCallback(async (card: SwipeCardType, signalType: SignalType) => {
     dismiss(card.user.id);
     try {
       const data = await api.post<{ match: (Match & { otherUser: User }) | null; isMatch: boolean }>(
-        '/matches/like', { receiverId: card.user.id, isSuper: false }
+        '/matches/like', { receiverId: card.user.id, signalType }
       );
       if (data.isMatch && data.match) setNewMatch({ ...data.match, otherUser: card.user });
     } catch (err: any) {
@@ -788,23 +861,6 @@ export default function Discover() {
     dismiss(card.user.id);
     try { await api.post('/matches/pass', { receiverId: card.user.id }); } catch { /* non-critical */ }
   }, [dismiss]);
-
-  const handleSuperLike = useCallback(async (card: SwipeCardType) => {
-    if (superLikesRemaining === 0) return;
-    setSuperLikesRemaining(n => Math.max(0, n - 1));
-    dismiss(card.user.id);
-    try {
-      const data = await api.post<{ match: (Match & { otherUser: User }) | null; isMatch: boolean }>(
-        '/matches/like', { receiverId: card.user.id, isSuper: true }
-      );
-      toast('⭐ Super Like sent!', { icon: '💙' });
-      if (data.isMatch && data.match) setNewMatch({ ...data.match, otherUser: card.user });
-    } catch (err: any) {
-      setSuperLikesRemaining(n => n + 1);
-      setDismissed(prev => { const s = new Set(prev); s.delete(card.user.id); return s; });
-      if (err?.status === 429) setPremiumGate({ open: true, reason: 'super_likes' });
-    }
-  }, [superLikesRemaining, dismiss]);
 
   const clampedIndex = Math.min(viewIndex, Math.max(0, visibleCards.length - 1));
   const card = visibleCards[clampedIndex];
@@ -895,11 +951,10 @@ export default function Discover() {
                   <FeedCard
                     card={card}
                     isActive={true}
-                    superLikesRemaining={superLikesRemaining}
                     showDebug={debugMode}
-                    onLike={() => handleLike(card)}
+                    onSignal={(type) => handleSignal(card, type)}
                     onPass={() => handlePass(card)}
-                    onSuperLike={() => handleSuperLike(card)}
+                    onTransitionChange={(v) => { blockSwipeRef.current = v; }}
                   />
                 </div>
               </motion.div>

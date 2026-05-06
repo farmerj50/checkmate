@@ -6,13 +6,13 @@ import {
   Edit3, Settings, MapPin, Briefcase, GraduationCap,
   Heart, X, ChevronRight, Ruler, BadgeCheck,
   LogOut, ShieldCheck, Clock, Crown, Zap, Video, Trash2, Play, Star,
-  Plus, Camera, Users, Sparkles, Pencil,
+  Plus, Camera, Users, Sparkles, Pencil, Grid3x3,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import { auth } from '../lib/firebase';
-import type { User } from '../types';
+import type { User, Post } from '../types';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import VideoRecorder from '../components/VideoRecorder';
@@ -704,13 +704,22 @@ export default function Profile() {
   const [boostedUntil, setBoostedUntil] = useState<Date | null>(null);
   const [verifying, setVerifying] = useState(false);
   const verifyInputRef = useRef<HTMLInputElement>(null);
+  const [profileTab, setProfileTab] = useState<'dating' | 'posts'>('dating');
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [followCounts, setFollowCounts] = useState<{ followers: number; following: number }>({ followers: 0, following: 0 });
 
   useEffect(() => {
-    api
-      .get<{ user: User }>('/users/profile')
-      .then((d) => setUser(d.user))
-      .catch(() => toast.error('Failed to load profile'))
-      .finally(() => setLoading(false));
+    api.get<{ user: User }>('/users/profile').then((d) => {
+      setUser(d.user);
+      const uid = d.user.id;
+      Promise.all([
+        api.get<{ posts: Post[] }>(`/social/posts/user/${uid}`),
+        api.get<{ followerCount: number; followingCount: number; isFollowing: boolean }>(`/social/users/${uid}/follow-status`),
+      ]).then(([postsData, fs]) => {
+        setPosts(postsData.posts);
+        setFollowCounts({ followers: fs.followerCount, following: fs.followingCount });
+      }).catch(() => {});
+    }).catch(() => toast.error('Failed to load profile')).finally(() => setLoading(false));
   }, []);
 
   if (loading) {
@@ -752,13 +761,31 @@ export default function Profile() {
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-6 pb-2 relative z-10">
-        <div>
-          <h1 className="text-xl font-bold text-white">My Profile</h1>
-          <p className="text-sm text-white/50 mt-1">Keep your profile feeling fresh with a modern video intro.</p>
+        {/* Avatar + name */}
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-white/10 overflow-hidden ring-2 ring-white/20 flex-none">
+            {user?.profilePictures?.[0]
+              ? <img src={normalizeAssetUrl(user.profilePictures[0]) ?? ''} alt="" className="w-full h-full object-cover" />
+              : <div className="w-full h-full flex items-center justify-center text-white/50 text-lg font-bold">{user?.firstName?.[0] ?? '?'}</div>
+            }
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white leading-tight">{user?.firstName ?? 'My Profile'}</h1>
+            <p className="text-xs text-white/40">Edit profile</p>
+          </div>
         </div>
-        <button onClick={() => navigate('/settings')} className="p-2 rounded-full hover:bg-white/10">
-          <Settings className="w-5 h-5 text-white/60" />
-        </button>
+        {/* Actions */}
+        <div className="flex items-center gap-1">
+          <button onClick={() => navigate('/settings')} className="p-2 rounded-full hover:bg-white/10 transition-colors">
+            <Settings className="w-5 h-5 text-white/60" />
+          </button>
+          <button
+            onClick={async () => { await logout(); navigate('/login'); }}
+            className="p-2 rounded-full hover:bg-red-500/10 text-white/60 hover:text-red-400 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 mx-auto max-w-6xl space-y-4 relative z-10">
@@ -873,6 +900,22 @@ export default function Profile() {
             </button>
           </div>
 
+          {/* Follow counts */}
+          <div className="flex gap-8 mb-4 pt-1">
+            <div className="text-center">
+              <p className="text-white font-bold text-lg">{posts.length}</p>
+              <p className="text-white/40 text-xs">Posts</p>
+            </div>
+            <div className="text-center">
+              <p className="text-white font-bold text-lg">{followCounts.followers}</p>
+              <p className="text-white/40 text-xs">Followers</p>
+            </div>
+            <div className="text-center">
+              <p className="text-white font-bold text-lg">{followCounts.following}</p>
+              <p className="text-white/40 text-xs">Following</p>
+            </div>
+          </div>
+
           <div className="space-y-2 text-sm text-white/50 mb-4">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4 text-white/30" />
@@ -926,6 +969,66 @@ export default function Profile() {
             </div>
           )}
         </div>
+
+        {/* Tab switcher: Dating Profile | Posts */}
+        <div className="flex bg-white/5 rounded-2xl p-1 gap-1">
+          <button
+            onClick={() => setProfileTab('dating')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors ${profileTab === 'dating' ? 'bg-white/12 text-white' : 'text-white/40 hover:text-white/70'}`}
+          >
+            <Heart className="w-4 h-4" />
+            Dating Profile
+          </button>
+          <button
+            onClick={() => setProfileTab('posts')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors ${profileTab === 'posts' ? 'bg-white/12 text-white' : 'text-white/40 hover:text-white/70'}`}
+          >
+            <Grid3x3 className="w-4 h-4" />
+            Posts {posts.length > 0 && <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full">{posts.length}</span>}
+          </button>
+        </div>
+
+        {/* Posts grid */}
+        {profileTab === 'posts' && (
+          <div>
+            {posts.length === 0 ? (
+              <div className="text-center py-16 rounded-3xl bg-white/3 border border-white/5">
+                <Grid3x3 className="w-10 h-10 text-white/15 mx-auto mb-3" />
+                <p className="text-white/40 text-sm mb-3">No posts yet</p>
+                <button
+                  onClick={() => navigate('/create')}
+                  className="text-[#ff4d8d] text-sm font-medium hover:text-[#ff4d8d]/80 transition-colors"
+                >
+                  Create your first post →
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-0.5 rounded-2xl overflow-hidden">
+                {posts.map((p, i) => {
+                  const media = normalizeAssetUrl(p.mediaUrl);
+                  return (
+                    <motion.button
+                      key={p.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: i * 0.03 }}
+                      onClick={() => navigate(`/post/${p.id}`)}
+                      className="relative aspect-square bg-white/5 overflow-hidden"
+                    >
+                      {p.mediaType === 'VIDEO' ? (
+                        <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={media ?? ''} alt="" className="w-full h-full object-cover" />
+                      )}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {profileTab === 'dating' && <>
 
         {/* Verification */}
         {user.isVerified ? (
@@ -1051,14 +1154,7 @@ export default function Profile() {
           </button>
         )}
 
-        {/* Logout */}
-        <button
-          onClick={async () => { await logout(); navigate('/login'); }}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-red-400 font-medium hover:bg-red-500/10 transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          Sign out
-        </button>
+        </> /* end profileTab === 'dating' */}
       </div>
 
       {/* Edit sheet */}

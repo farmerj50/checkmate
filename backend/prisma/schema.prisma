@@ -45,7 +45,7 @@ model User {
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
-  // Relationships
+  // Dating relationships
   sentLikes        Like[]          @relation("LikeSender")
   receivedLikes    Like[]          @relation("LikeReceiver")
   sentMessages     Message[]       @relation("MessageSender")
@@ -57,6 +57,15 @@ model User {
   blocks           Block[]         @relation("BlockBlocker")
   blockedBy        Block[]         @relation("BlockBlocked")
   preferences      UserPreference?
+
+  // Social relationships
+  following        Follow[]        @relation("FollowFollower")
+  followers        Follow[]        @relation("FollowFollowing")
+  posts            Post[]          @relation("PostAuthor")
+  postLikes        PostLike[]      @relation("PostLikeUser")
+  comments         Comment[]       @relation("CommentAuthor")
+  notifications    Notification[]  @relation("NotificationUser")
+  userPrompt       UserPrompt?
 
   @@map("users")
 }
@@ -93,6 +102,7 @@ model Like {
   senderId   String
   receiverId String
   isSuper    Boolean  @default(false)
+  signalType String?  // 'INTRIGUED' | 'STIMULATING' | 'HIGH_VALUE' | 'ALIGNED'
   createdAt  DateTime @default(now())
 
   sender   User @relation("LikeSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -213,4 +223,122 @@ model Block {
 
   @@unique([blockerId, blockedId])
   @@map("blocks")
+}
+
+// ── Social: Follows ───────────────────────────────────────────────────────────
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("FollowFollower",  fields: [followerId],  references: [id], onDelete: Cascade)
+  following User @relation("FollowFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+// ── Social: Posts ─────────────────────────────────────────────────────────────
+model Post {
+  id        String        @id @default(cuid())
+  authorId  String
+  mediaUrl  String
+  mediaType PostMediaType @default(VIDEO)
+  caption   String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  author   User      @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  likes    PostLike[]
+  comments Comment[]
+
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+enum PostMediaType {
+  VIDEO
+  IMAGE
+}
+
+// ── Social: Post Likes ────────────────────────────────────────────────────────
+model PostLike {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation("PostLikeUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@map("post_likes")
+}
+
+// ── Social: Comments ──────────────────────────────────────────────────────────
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  authorId  String
+  content   String   @db.VarChar(500)
+  createdAt DateTime @default(now())
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@map("comments")
+}
+
+// ── Social: Notifications ─────────────────────────────────────────────────────
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  actorId   String?
+  postId    String?
+  commentId String?
+  matchId   String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  NEW_FOLLOWER
+  POST_LIKED
+  POST_COMMENTED
+  NEW_MATCH
+}
+
+// ── Dating: User Prompts ──────────────────────────────────────────────────────
+model UserPrompt {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  question  String
+  answer    String   @db.VarChar(300)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_prompts")
+}
+
+// ── Social: Daily Prompts ─────────────────────────────────────────────────────
+model DailyPrompt {
+  id        String   @id @default(cuid())
+  question  String
+  category  String   @default("general")
+  isActive  Boolean  @default(false)
+  date      DateTime @default(now())
+
+  @@map("daily_prompts")
 }

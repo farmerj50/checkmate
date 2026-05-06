@@ -160,6 +160,7 @@ router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res
       },
       orderBy: { lastActive: 'desc' },
       take: 200,
+      include: { userPrompt: true },
     });
 
     // Score + filter candidates
@@ -200,7 +201,16 @@ router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res
     const now = new Date();
     const boosted = scored.filter((s) => s.user.boostedUntil && new Date(s.user.boostedUntil) > now);
     const regular = scored.filter((s) => !s.user.boostedUntil || new Date(s.user.boostedUntil) <= now);
-    const final = [...boosted, ...regular].slice(0, 10);
+    const finalScored = [...boosted, ...regular].slice(0, 10);
+
+    // Attach prompt to each result (candidates indexed by id for O(1) lookup)
+    const candidateMap = new Map(candidates.map((c) => [c.id, c]));
+    const final = finalScored.map((s) => ({
+      ...s,
+      prompt: candidateMap.get(s.user.id)?.userPrompt
+        ? { question: candidateMap.get(s.user.id)!.userPrompt!.question, answer: candidateMap.get(s.user.id)!.userPrompt!.answer }
+        : null,
+    }));
 
     res.json({ matches: final });
   } catch (error) {
@@ -238,6 +248,76 @@ router.get('/super-likes/remaining', authenticateToken, async (req: Authenticate
   } catch (error) {
     console.error('Super likes error:', error);
     res.status(500).json({ error: 'Failed to get super likes remaining' });
+  }
+});
+
+// ── GET /users/me/prompt ──────────────────────────────────────────────────────
+router.get('/me/prompt', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const dbUser = await prisma.user.findUnique({
+      where: { firebaseUid: req.user!.uid },
+      select: { id: true },
+    });
+    if (!dbUser) return res.status(404).json({ error: 'User not found' });
+    const prompt = await prisma.userPrompt.findUnique({ where: { userId: dbUser.id } });
+    res.json({ prompt });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get prompt' });
+  }
+});
+
+// ── PUT /users/me/prompt ──────────────────────────────────────────────────────
+router.put('/me/prompt', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { question, answer } = z.object({
+      question: z.string().min(1),
+      answer: z.string().min(1).max(300),
+    }).parse(req.body);
+
+    const dbUser = await prisma.user.findUnique({
+      where: { firebaseUid: req.user!.uid },
+      select: { id: true },
+    });
+    if (!dbUser) return res.status(404).json({ error: 'User not found' });
+
+    const prompt = await prisma.userPrompt.upsert({
+      where: { userId: dbUser.id },
+      update: { question, answer },
+      create: { userId: dbUser.id, question, answer },
+    });
+    res.json({ prompt });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update prompt' });
+  }
+});
+
+// ── GET /users/daily-prompt ───────────────────────────────────────────────────
+router.get('/daily-prompt', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const prompt = await prisma.dailyPrompt.findFirst({ where: { isActive: true } });
+    const responseCount = prompt
+      ? await prisma.post.count({ where: { createdAt: { gte: new Date(Date.now() - 86_400_000) } } })
+      : 0;
+    res.json({ prompt: prompt ? { ...prompt, responseCount } : null });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get daily prompt' });
+  }
+});
+
+// ── GET /users/:userId — public profile (MUST be last) ───────────────────────
+router.get('/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: {
+        id: true, firstName: true, bio: true, profilePictures: true,
+        profileVideo: true, isVerified: true, occupation: true, dateOfBirth: true,
+      },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ user });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

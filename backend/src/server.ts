@@ -18,6 +18,8 @@ import uploadRoutes from './routes/upload';
 import safetyRoutes from './routes/safety';
 import premiumRoutes, { handleStripeWebhook } from './routes/premium';
 import aiRoutes from './routes/ai';
+import socialRoutes from './routes/social';
+import { setIo } from './lib/io';
 
 const app = express();
 const httpServer = createServer(app);
@@ -51,6 +53,7 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/safety', safetyRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/social', socialRoutes);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -72,6 +75,7 @@ const io = new SocketServer(httpServer, {
 });
 
 initSocket(io);
+setIo(io);
 
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
