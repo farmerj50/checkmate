@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Heart, X, MapPin, BadgeCheck,
-  Settings, Sparkles, Info, Crown, RefreshCw,
+  Settings, Sparkles, Info, RefreshCw,
   Volume2, VolumeX, ChevronUp, Video, Camera,
+  Home, Search, Flame, PlusSquare, User as UserIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PremiumGate from '../components/PremiumGate';
@@ -123,6 +124,18 @@ function FeedCard({
 
   const [signalFeedback, setSignalFeedback] = useState<{ type: SignalType; color: string; message: string; emoji: string } | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const viewRecordedRef = useRef(false);
+
+  function handleOpenProfile() {
+    setProfileOpen((v) => {
+      const opening = !v;
+      if (opening && !viewRecordedRef.current) {
+        viewRecordedRef.current = true;
+        api.post(`/users/${user.id}/view`, {}).catch(() => {});
+      }
+      return opening;
+    });
+  }
 
   function getSignalMessage(type: SignalType): string {
     return {
@@ -152,6 +165,7 @@ function FeedCard({
     setVideoReady(false);
     setVideoError(false);
     setProfileOpen(false);
+    viewRecordedRef.current = false;
     totalWatchRef.current = 0;
     watchStartRef.current = null;
     setDebugWatchSec(0);
@@ -399,7 +413,7 @@ function FeedCard({
             {/* Info / expand toggle */}
             <button
               className="w-8 h-8 rounded-full bg-black/45 backdrop-blur-md flex items-center justify-center"
-              onClick={() => setProfileOpen(v => !v)}
+              onClick={handleOpenProfile}
             >
               <Info className="w-4 h-4 text-white/70" />
             </button>
@@ -452,7 +466,7 @@ function FeedCard({
 
           {/* "More" toggle */}
           <button
-            onClick={() => setProfileOpen(v => !v)}
+            onClick={handleOpenProfile}
             className="flex items-center gap-1 text-white/45 text-xs hover:text-white/75 transition-colors"
           >
             <ChevronUp className={`w-3.5 h-3.5 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`} />
@@ -738,7 +752,7 @@ function FeedCard({
 // ── Discover Page ─────────────────────────────────────────────────────────────
 export default function Discover() {
   const navigate = useNavigate();
-  const { dbUser } = useAuth();
+  useAuth();
   const [cards, setCards]             = useState<SwipeCardType[]>([]);
   const [dismissed, setDismissed]     = useState<Set<string>>(new Set());
   const [viewIndex, setViewIndex]     = useState(0);
@@ -867,10 +881,37 @@ export default function Discover() {
   const hasMore = visibleCards.length > 0;
 
   const HEADER_H = 52;
-  const NAV_H    = 68;
 
   return (
-    <div className="fixed inset-0 bg-black">
+    <div className="fixed inset-0 bg-[#050508] flex">
+
+      {/* ── Left Sidebar ── */}
+      <aside className="flex-none flex flex-col bg-[#0a0a0f]" style={{ width: 220 }}>
+        <div className="px-6 py-5 flex-none">
+          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
+          <p className="text-white/30 text-xs mt-0.5">Discover</p>
+        </div>
+        <nav className="flex-1 px-3 space-y-1">
+          {[
+            { to: '/home',    icon: Home,       label: 'Home' },
+            { to: '/explore', icon: Search,     label: 'Explore' },
+            { to: '/dating',  icon: Flame,      label: 'Dating' },
+            { to: '/create',  icon: PlusSquare, label: 'Create' },
+            { to: '/matches', icon: Heart,      label: 'Matches' },
+            { to: '/profile', icon: UserIcon,   label: 'Profile' },
+          ].map(({ to, icon: Icon, label }) => (
+            <NavLink key={to} to={to} className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
+            }>
+              <Icon className="w-5 h-5 flex-none" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+
+      {/* ── Main Content ── */}
+      <div className="flex-1 relative bg-black">
 
       {/* ── Header ── */}
       <div className="absolute top-0 inset-x-0 z-20 bg-black flex items-center justify-between px-4"
@@ -915,7 +956,7 @@ export default function Discover() {
       <div
         ref={feedAreaRef}
         className="absolute inset-x-0 flex justify-center bg-black"
-        style={{ top: HEADER_H, bottom: NAV_H }}
+        style={{ top: HEADER_H, bottom: 0 }}
       >
         {loading ? (
           <div className="flex items-center justify-center w-full">
@@ -963,29 +1004,6 @@ export default function Discover() {
         )}
       </div>
 
-      {/* ── Bottom Nav ── */}
-      <div
-        className="absolute bottom-0 inset-x-0 bg-black border-t border-zinc-900 flex justify-around items-center px-8"
-        style={{ height: NAV_H }}
-      >
-        <button onClick={() => navigate('/matches')} className="flex flex-col items-center gap-1">
-          <Heart className="w-5 h-5 text-zinc-500" />
-          <span className="text-zinc-600 text-[10px]">Matches</span>
-        </button>
-        <button onClick={() => navigate('/premium')} className="flex flex-col items-center gap-1">
-          <Crown className="w-5 h-5 text-zinc-500" />
-          <span className="text-zinc-600 text-[10px]">Premium</span>
-        </button>
-        <button onClick={() => navigate('/profile')} className="flex flex-col items-center gap-1">
-          {dbUser?.profilePictures?.[0] ? (
-            <img src={dbUser.profilePictures[0]} className="w-6 h-6 rounded-full object-cover border border-zinc-700" alt="me" />
-          ) : (
-            <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700" />
-          )}
-          <span className="text-zinc-600 text-[10px]">Profile</span>
-        </button>
-      </div>
-
       {/* ── Premium Gate ── */}
       <PremiumGate
         open={premiumGate.open}
@@ -1004,6 +1022,8 @@ export default function Discover() {
           />
         )}
       </AnimatePresence>
+
+      </div>{/* end main content */}
     </div>
   );
 }

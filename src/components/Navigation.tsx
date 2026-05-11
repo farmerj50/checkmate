@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Home, Search, PlusSquare, Heart, Bell } from 'lucide-react';
+import { Home, Search, Flame, PlusSquare, Heart, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -51,48 +51,21 @@ function useUnreadCount() {
   return count;
 }
 
-function useNotificationCount() {
-  const { dbUser } = useAuth();
-  const [count, setCount] = useState(0);
-  const socketRef = useRef<Awaited<ReturnType<typeof getSocket>> | null>(null);
-  const location = useLocation();
-
-  useEffect(() => {
-    if (!dbUser) return;
-    api.get<{ count: number }>('/social/notifications/unread-count').then((d) => setCount(d.count)).catch(() => {});
-
-    let mounted = true;
-    getSocket().then((socket) => {
-      if (!mounted) return;
-      socketRef.current = socket;
-      socket.on('notification:new', () => setCount((n) => n + 1));
-    });
-    return () => { mounted = false; socketRef.current?.off('notification:new'); };
-  }, [dbUser]);
-
-  useEffect(() => {
-    if (location.pathname === '/notifications') {
-      setCount(0);
-    }
-  }, [location.pathname]);
-
-  return count;
-}
 
 const Navigation: React.FC = () => {
   const navigate  = useNavigate();
   const location  = useLocation();
-  const unread     = useUnreadCount();
-  const notifCount = useNotificationCount();
+  const unread = useUnreadCount();
 
-  // These pages use their own full-screen layout with a left sidebar
-  if (location.pathname === '/explore' || location.pathname === '/studio') return null;
+  // These pages use their own full-screen layout
+  if (location.pathname === '/explore' || location.pathname === '/studio' || location.pathname === '/dating') return null;
 
   const navItems = [
-    { path: '/home',          icon: Home,       label: 'Home',          badge: 0 },
-    { path: '/explore',       icon: Search,     label: 'Explore',       badge: 0 },
-    { path: '/matches',       icon: Heart,      label: 'Matches',       badge: unread },
-    { path: '/notifications', icon: Bell,       label: 'Alerts',        badge: notifCount },
+    { path: '/home',    icon: Home,   label: 'Home',    badge: 0 },
+    { path: '/explore', icon: Search, label: 'Explore', badge: 0 },
+    { path: '/dating',  icon: Flame,  label: 'Dating',  badge: 0 },
+    { path: '/matches', icon: Heart,  label: 'Matches', badge: unread },
+    { path: '/profile', icon: User,   label: 'Profile', badge: 0 },
   ];
 
   return (

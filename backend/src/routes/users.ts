@@ -304,6 +304,58 @@ router.get('/daily-prompt', authenticateToken, async (req: AuthenticatedRequest,
   }
 });
 
+// ── POST /users/:userId/view — record a profile view ────────────────────────
+router.post('/:userId/view', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const viewerId = req.user!.uid;
+    const viewedId = req.params.userId;
+    if (viewerId === viewedId) return res.json({ ok: true }); // don't track self-views
+    const currentUser = await prisma.user.findUnique({ where: { firebaseUid: viewerId }, select: { id: true } });
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    await prisma.profileView.upsert({
+      where: { viewerId_viewedId: { viewerId: currentUser.id, viewedId } },
+      update: { createdAt: new Date() },
+      create: { viewerId: currentUser.id, viewedId },
+    });
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /users/me/viewers — who viewed my profile ────────────────────────────
+router.get('/me/viewers', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const currentUser = await prisma.user.findUnique({
+      where: { firebaseUid: req.user!.uid },
+      select: { id: true, isPremium: true },
+    });
+    if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+
+    const views = await prisma.profileView.findMany({
+      where: { viewedId: currentUser.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: {
+        viewer: {
+          select: {
+            id: true, firstName: true, profilePictures: true,
+            occupation: true, dateOfBirth: true, isVerified: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      views: views.map((v) => ({ id: v.id, createdAt: v.createdAt, viewer: v.viewer })),
+      isPremium: currentUser.isPremium,
+      count: views.length,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /users/:userId — public profile (MUST be last) ───────────────────────
 router.get('/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {

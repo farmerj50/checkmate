@@ -66,6 +66,8 @@ model User {
   comments         Comment[]       @relation("CommentAuthor")
   notifications    Notification[]  @relation("NotificationUser")
   userPrompt       UserPrompt?
+  profileViewsMade     ProfileView[] @relation("ProfileViewViewer")
+  profileViewsReceived ProfileView[] @relation("ProfileViewViewed")
 
   @@map("users")
 }
@@ -341,4 +343,18 @@ model DailyPrompt {
   date      DateTime @default(now())
 
   @@map("daily_prompts")
+}
+
+model ProfileView {
+  id         String   @id @default(cuid())
+  viewerId   String
+  viewedId   String
+  createdAt  DateTime @default(now())
+
+  viewer User @relation("ProfileViewViewer", fields: [viewerId], references: [id], onDelete: Cascade)
+  viewed User @relation("ProfileViewViewed", fields: [viewedId], references: [id], onDelete: Cascade)
+
+  @@unique([viewerId, viewedId])
+  @@index([viewedId, createdAt])
+  @@map("profile_views")
 }

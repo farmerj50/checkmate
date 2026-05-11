@@ -1,7 +1,7 @@
 import { useState, KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Heart, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Heart, ArrowRight, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { isDemoMode } from '../lib/firebase';
@@ -66,12 +66,17 @@ export default function Signup() {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="w-full max-w-sm relative z-10"
       >
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 mb-12">
-          <div className="w-10 h-10 rounded-2xl bg-pink-600 grid place-items-center shadow-lg shadow-pink-600/40">
-            <Heart className="w-5 h-5 text-white" />
+        {/* Back + Logo */}
+        <div className="flex items-center gap-3 mb-12">
+          <Link to="/" className="p-2 rounded-full bg-white/8 hover:bg-white/12 transition-colors">
+            <ArrowLeft className="w-4 h-4 text-white/60" />
+          </Link>
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-pink-600 grid place-items-center shadow-lg shadow-pink-600/40">
+              <Heart className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-white text-xl font-semibold tracking-tight">CheckMate</span>
           </div>
-          <span className="text-white text-xl font-semibold tracking-tight">CheckMate</span>
         </div>
 
         <h1 className="text-3xl font-bold text-white mb-1">Create account</h1>

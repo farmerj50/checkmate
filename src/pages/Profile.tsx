@@ -706,6 +706,8 @@ export default function Profile() {
   const verifyInputRef = useRef<HTMLInputElement>(null);
   const [profileTab, setProfileTab] = useState<'dating' | 'posts'>('dating');
   const [posts, setPosts] = useState<Post[]>([]);
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [followCounts, setFollowCounts] = useState<{ followers: number; following: number }>({ followers: 0, following: 0 });
 
   useEffect(() => {
@@ -721,6 +723,19 @@ export default function Profile() {
       }).catch(() => {});
     }).catch(() => toast.error('Failed to load profile')).finally(() => setLoading(false));
   }, []);
+
+  async function deletePost(postId: string) {
+    setDeletingId(postId);
+    try {
+      await api.delete(`/social/posts/${postId}`);
+      setPosts((prev) => prev.filter((p) => p.id !== postId));
+      toast.success('Post deleted');
+    } catch {
+      toast.error('Failed to delete post');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -1003,27 +1018,63 @@ export default function Profile() {
                 </button>
               </div>
             ) : (
+              <>
+              <div className="flex items-center justify-between mb-2 px-0.5">
+                <span className="text-white/40 text-xs">{posts.length} {posts.length === 1 ? 'post' : 'posts'}</span>
+                <button
+                  onClick={() => setDeleteMode((v) => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+                    deleteMode
+                      ? 'bg-[#ff4d8d]/20 text-[#ff4d8d] border border-[#ff4d8d]/30'
+                      : 'bg-white/8 text-white/50 border border-white/10'
+                  }`}
+                >
+                  <Trash2 className="w-3 h-3" />
+                  {deleteMode ? 'Done' : 'Delete'}
+                </button>
+              </div>
               <div className="grid grid-cols-3 gap-0.5 rounded-2xl overflow-hidden">
                 {posts.map((p, i) => {
                   const media = normalizeAssetUrl(p.mediaUrl);
+                  const isDeleting = deletingId === p.id;
                   return (
-                    <motion.button
+                    <motion.div
                       key={p.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: i * 0.03 }}
-                      onClick={() => navigate(`/post/${p.id}`)}
                       className="relative aspect-square bg-white/5 overflow-hidden"
                     >
-                      {p.mediaType === 'VIDEO' ? (
-                        <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                      ) : (
-                        <img src={media ?? ''} alt="" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => !deleteMode && navigate(`/post/${p.id}`)}
+                        className="w-full h-full"
+                      >
+                        {p.mediaType === 'VIDEO' ? (
+                          <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={media ?? ''} alt="" className="w-full h-full object-cover" />
+                        )}
+                      </button>
+                      {deleteMode && (
+                        <button
+                          onClick={() => deletePost(p.id)}
+                          disabled={isDeleting}
+                          className="absolute inset-0 bg-black/60 flex items-center justify-center"
+                        >
+                          {isDeleting ? (
+                            <div className="w-6 h-6 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-[#ff4d8d] flex items-center justify-center shadow-lg">
+                              <Trash2 className="w-5 h-5 text-white" />
+                            </div>
+                          )}
+                        </button>
                       )}
-                    </motion.button>
+                    </motion.div>
                   );
                 })}
               </div>
+              </>
             )}
           </div>
         )}

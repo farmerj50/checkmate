@@ -25,6 +25,18 @@
 .kb3 { animation: kb3 7s ease-in-out forwards; }
 .kb4 { animation: kb4 10s ease-in-out forwards; }
 
+/* Override browser autofill background on dark inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+  -webkit-text-fill-color: white !important;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: #f472b6;
+}
+
 /* Hide scrollbar on feed */
 .feed-scroll { scrollbar-width: none; }
 .feed-scroll::-webkit-scrollbar { display: none; }

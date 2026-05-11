@@ -85,26 +85,8 @@ function Bubble({ src, size, x, y, delay, dur, z, drift }: typeof BUBBLES[0]) {
   );
 }
 
-// ── Mouse parallax hook ───────────────────────────────────────────────────────
-function useMouseParallax(strength = 18) {
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-
-  const onMouseMove = (e: React.MouseEvent) => {
-    const cx = e.currentTarget.clientWidth / 2;
-    const cy = e.currentTarget.clientHeight / 2;
-    x.set(((e.clientX - cx) / cx) * strength);
-    y.set(((e.clientY - cy) / cy) * strength);
-  };
-
-  const onMouseLeave = () => { x.set(0); y.set(0); };
-
-  return { x, y, onMouseMove, onMouseLeave };
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Landing() {
-  const parallax = useMouseParallax(22);
   return (
     <div className="min-h-screen bg-[#07070d] text-white overflow-x-hidden">
 
@@ -140,8 +122,6 @@ export default function Landing() {
       {/* ── Hero ── */}
       <section
         className="relative min-h-[88vh] flex items-center overflow-hidden"
-        onMouseMove={parallax.onMouseMove}
-        onMouseLeave={parallax.onMouseLeave}
       >
 
         {/* 3-D bubble field */}
@@ -152,14 +132,10 @@ export default function Landing() {
           {/* Deep radial glow */}
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_40%,rgba(219,39,119,0.2),transparent_70%)]" />
 
-          {/* Parallax wrapper */}
-          <motion.div
-            className="absolute inset-0"
-            style={{ x: parallax.x, y: parallax.y }}
-            transition={{ type: "spring", stiffness: 60, damping: 20 }}
-          >
+          {/* Bubbles — float independently, no mouse tracking */}
+          <div className="absolute inset-0">
             {BUBBLES.map((b, i) => <Bubble key={i} {...b} />)}
-          </motion.div>
+          </div>
         </div>
 
         {/* Dark vignette so text pops */}

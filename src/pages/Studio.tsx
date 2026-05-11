@@ -7,7 +7,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Home, Search, PlusSquare, Heart, Bell, Upload, Sparkles,
   Send, Loader2, X, Video, Film, Wand2, Hash, FileText,
-  Image as ImageIcon, Zap, Plus, Check,
+  Image as ImageIcon, Zap, Plus, Check, User,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -190,6 +190,7 @@ export default function Studio() {
             { to: '/studio',        icon: Film,       label: 'Studio' },
             { to: '/matches',       icon: Heart,      label: 'Matches' },
             { to: '/notifications', icon: Bell,       label: 'Alerts' },
+            { to: '/profile',       icon: User,       label: 'Profile' },
           ].map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
