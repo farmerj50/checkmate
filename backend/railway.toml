@@ -1,7 +1,6 @@
 [build]
-builder = "nixpacks"
-buildCommand = "npm ci && npx prisma generate && npm run build"
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "node dist/server.js"
 restartPolicyType = "on_failure"
