@@ -9,7 +9,10 @@ export async function getSocket(): Promise<Socket> {
   const user = auth.currentUser;
   const token = user ? await user.getIdToken() : 'demo_user';
 
-  socket = io('/', {
+  const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+  const socketOrigin = apiUrl ? apiUrl.replace(/\/api$/, '') : '/';
+
+  socket = io(socketOrigin, {
     path: '/socket.io',
     auth: { token },
     transports: ['websocket', 'polling'],

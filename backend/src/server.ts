@@ -8,7 +8,7 @@ import { Server as SocketServer } from 'socket.io';
 import { prisma } from './lib/prisma';
 import { initSocket } from './socket/chat';
 
-dotenv.config({ path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env.dev' });
+dotenv.config({ path: '.env.dev' }); // Railway injects real env vars; this is a local dev fallback only
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
