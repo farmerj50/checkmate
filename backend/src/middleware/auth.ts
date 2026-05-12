@@ -7,19 +7,22 @@ export interface AuthenticatedRequest extends Request {
 
 // Initialize Firebase Admin once, only if credentials are available
 if (!admin.apps.length) {
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  if (projectId && projectId !== 'your_project_id') {
+  const projectId    = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail  = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey   = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+
+  if (projectId && clientEmail && privateKey) {
     try {
       admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
+        credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
         projectId,
       });
       console.log('✅ Firebase Admin initialized');
     } catch (e) {
-      console.warn('⚠️  Firebase Admin init failed — running in demo mode. Set GOOGLE_APPLICATION_CREDENTIALS to enable real auth.');
+      console.warn('⚠️  Firebase Admin init failed — running in demo mode.', e);
     }
   } else {
-    console.warn('⚠️  FIREBASE_PROJECT_ID not set — running in demo auth mode.');
+    console.warn('⚠️  Firebase env vars not set — running in demo auth mode.');
   }
 }
 
