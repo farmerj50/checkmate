@@ -3,5 +3,5 @@ builder = "nixpacks"
 buildCommand = "npm install --no-audit && npm run build"
 
 [deploy]
-startCommand = "npx vite preview --port $PORT --host 0.0.0.0"
+startCommand = "npx serve -s dist -l $PORT"
 restartPolicyType = "on_failure"
