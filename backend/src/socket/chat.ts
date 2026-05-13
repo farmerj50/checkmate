@@ -1,6 +1,7 @@
 import { Server as SocketServer, Socket } from 'socket.io';
 import admin from 'firebase-admin';
 import { prisma } from '../lib/prisma';
+import { evaluateConversation } from '../routes/judge';
 
 // Map firebaseUid → socketId for online presence
 const onlineUsers = new Map<string, string>();
@@ -98,6 +99,16 @@ export function initSocket(io: SocketServer) {
             return;
           }
 
+          // Block messages during judge cooldown
+          const judgeCheck = await prisma.judgeSession.findUnique({
+            where: { matchId },
+            select: { status: true },
+          });
+          if (judgeCheck?.status === 'COOLDOWN') {
+            ack?.({ ok: false, error: 'Interaction is in cooldown' });
+            return;
+          }
+
           const receiverId = match.user1Id === userId ? match.user2Id : match.user1Id;
 
           const message = await prisma.message.create({
@@ -120,6 +131,14 @@ export function initSocket(io: SocketServer) {
             senderId: userId,
             content: message.content,
           });
+
+          // Auto-evaluate conversation every 10 messages when judge is active
+          if (judgeCheck && ['ACTIVE', 'TIER1_NOTICE'].includes(judgeCheck.status)) {
+            const msgCount = await prisma.message.count({ where: { matchId } });
+            if (msgCount % 10 === 0) {
+              evaluateConversation(matchId); // fire and forget
+            }
+          }
 
           ack?.({ ok: true, message });
         } catch (err) {
