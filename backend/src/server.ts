@@ -26,11 +26,29 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 3001;
 
-const allowedOrigins = process.env.CORS_ALLOWLIST_JSON
-  ? (JSON.parse(process.env.CORS_ALLOWLIST_JSON) as string[])
-  : [process.env.FRONTEND_URL || 'http://localhost:5173'];
+const allowedOrigins: string[] = [];
+try {
+  if (process.env.CORS_ALLOWLIST_JSON) {
+    allowedOrigins.push(...JSON.parse(process.env.CORS_ALLOWLIST_JSON));
+  }
+} catch {
+  // malformed JSON — fall through to FRONTEND_URL
+}
+if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL);
+if (!allowedOrigins.length) allowedOrigins.push('http://localhost:5173');
 
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+console.log('CORS allowed origins:', allowedOrigins);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: ${origin} not allowed`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+app.options('*', cors());
 app.use(helmet());
 
 // Stripe webhook needs raw body — must be before express.json()
