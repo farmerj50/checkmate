@@ -19,6 +19,7 @@ import safetyRoutes from './routes/safety';
 import premiumRoutes, { handleStripeWebhook } from './routes/premium';
 import aiRoutes from './routes/ai';
 import socialRoutes from './routes/social';
+import judgeRoutes from './routes/judge';
 import { setIo } from './lib/io';
 
 const app = express();
@@ -29,8 +30,8 @@ const allowedOrigins = process.env.CORS_ALLOWLIST_JSON
   ? (JSON.parse(process.env.CORS_ALLOWLIST_JSON) as string[])
   : [process.env.FRONTEND_URL || 'http://localhost:5173'];
 
-app.use(helmet());
 app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(helmet());
 
 // Stripe webhook needs raw body — must be before express.json()
 app.post(
@@ -54,6 +55,7 @@ app.use('/api/safety', safetyRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/social', socialRoutes);
+app.use('/api/matches', judgeRoutes);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
