@@ -7,23 +7,29 @@ export interface AuthenticatedRequest extends Request {
 
 // Initialize Firebase Admin once, only if credentials are available
 if (!admin.apps.length) {
-  const projectId    = process.env.FIREBASE_PROJECT_ID;
-  const clientEmail  = process.env.FIREBASE_CLIENT_EMAIL;
-  const rawKey       = (process.env.FIREBASE_PRIVATE_KEY ?? '').replace(/^["']|["']$/g, '');
-  const privateKey   = rawKey.includes('\\n') ? rawKey.replace(/\\n/g, '\n') : rawKey;
-
-  if (projectId && clientEmail && privateKey) {
-    try {
-      admin.initializeApp({
-        credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-        projectId,
-      });
-      console.log('✅ Firebase Admin initialized');
-    } catch (e) {
-      console.warn('⚠️  Firebase Admin init failed — running in demo mode.', e);
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      // Preferred: full service account JSON — JSON.parse handles \n in private_key automatically
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+      console.log('✅ Firebase Admin initialized (service account JSON)');
+    } else {
+      const projectId   = process.env.FIREBASE_PROJECT_ID;
+      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+      const rawKey      = (process.env.FIREBASE_PRIVATE_KEY ?? '').replace(/^["']|["']$/g, '');
+      const privateKey  = rawKey.replace(/\\n/g, '\n');
+      if (projectId && clientEmail && privateKey) {
+        admin.initializeApp({
+          credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+          projectId,
+        });
+        console.log('✅ Firebase Admin initialized (individual vars)');
+      } else {
+        console.warn('⚠️  Firebase env vars not set — running in demo auth mode.');
+      }
     }
-  } else {
-    console.warn('⚠️  Firebase env vars not set — running in demo auth mode.');
+  } catch (e) {
+    console.warn('⚠️  Firebase Admin init failed — running in demo mode.', e);
   }
 }
 
