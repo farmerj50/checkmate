@@ -3,5 +3,5 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "npx prisma db push --accept-data-loss && npx tsx src/server.ts"
+startCommand = "npx prisma db push --accept-data-loss --skip-generate || true && npx tsx src/server.ts"
 restartPolicyType = "on_failure"
