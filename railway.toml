@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install --no-audit && npm run build"
+buildCommand = "npm install --no-audit --include=dev && npm run build"
 
 [deploy]
 startCommand = "npx serve -s dist -l $PORT"
