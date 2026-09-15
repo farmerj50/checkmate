@@ -580,7 +580,7 @@ async function main() {
   ];
 
   let postCount = 0;
-  for (const { uid, mediaUrl, caption } of POST_DATA) {
+  for (const { uid, videoUrl, caption } of POST_DATA) {
     const author = uid === 'demo_user' ? demo : await prisma.user.findUnique({ where: { firebaseUid: uid } });
     if (!author) continue;
     await prisma.post.upsert({

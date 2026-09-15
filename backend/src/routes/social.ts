@@ -16,8 +16,17 @@ const AUTHOR_SELECT = {
   id: true, firstName: true, profilePictures: true, isVerified: true, profileVideo: true,
 };
 
+const REACTION_SELECT = {
+  emoji: true,
+  userId: true,
+};
+
 function emitNotification(userId: string, payload: object) {
   try { io?.to(`user:${userId}`).emit('notification:new', payload); } catch { /* silent */ }
+}
+
+function hasPrismaCode(err: unknown, code: string) {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === code;
 }
 
 // ── POST /posts ───────────────────────────────────────────────────────────────
@@ -55,6 +64,7 @@ router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) 
       },
       include: {
         author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
         _count: { select: { reactions: true, replies: true } },
       },
     });
@@ -69,14 +79,44 @@ router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) 
   }
 });
 
+// DELETE reaction (clear) - idempotent
+router.delete('/posts/:postId/reactions', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const schema = z.object({ emoji: z.string().min(1) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
 
-// ── GET /posts/:postId ────────────────────────────────────────────────────
-router.get('/posts/:postId', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
-    const post = await prisma.post.findUnique({ where: { id: req.params.postId }, include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } } });
+    const targetPost = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!targetPost || targetPost.isDeleted) return res.status(404).json({ error: 'Post not found' });
+
+    // delete if exists; idempotent
+    await prisma.postReaction.deleteMany({ where: { postId: req.params.postId, userId: me.id, emoji: parsed.data.emoji } });
+    const count = await prisma.postReaction.count({ where: { postId: req.params.postId } });
+    res.json({ reacted: false, count });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── GET /posts/:postId ────────────────────────────────────────────────────
+router.get('/posts/:postId', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+  if (req.params.postId === 'feed') return next();
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const post = await prisma.post.findUnique({
+      where: { id: req.params.postId },
+      include: {
+        author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
+      },
+    });
     if (!post || post.isDeleted) return res.status(404).json({ error: 'Post not found' });
 
     // Enforce blocking rules
@@ -114,7 +154,16 @@ router.get('/posts/:postId/replies', authenticateToken, async (req: Authenticate
       ],
     };
 
-    const replies = await prisma.post.findMany({ where: whereClause, orderBy: { createdAt: 'desc' }, take: limit, include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } } });
+    const replies = await prisma.post.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
+      },
+    });
     res.json({ replies: replies.map((r) => formatPost(r as RawPost, me.id)), nextCursor: replies[replies.length - 1]?.id ?? null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -153,6 +202,7 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
       take: limit,
       include: {
         author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
         _count: { select: { reactions: true, replies: true } },
       },
     });
@@ -172,10 +222,11 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
               ],
             },
           },
-          orderBy: { likes: { _count: 'desc' } },
+          orderBy: { createdAt: 'desc' },
           take: limit - followedPosts.length,
           include: {
             author: { select: AUTHOR_SELECT },
+            reactions: { select: REACTION_SELECT },
             _count: { select: { reactions: true, replies: true } },
           },
         })
@@ -212,7 +263,11 @@ router.get('/posts/user/:userId', authenticateToken, async (req: AuthenticatedRe
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
-      include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } },
+      include: {
+        author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
+      },
     });
     res.json({ posts: posts.map((p) => formatPost(p as RawPost, me.id)), nextCursor: posts[posts.length - 1]?.id ?? null });
   } catch (err: any) {
@@ -252,15 +307,28 @@ router.post('/posts/:postId/reactions', authenticateToken, async (req: Authentic
     const blockedRel = await prisma.block.findFirst({ where: { OR: [ { blockerId: targetPost.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: targetPost.authorId } ] } });
     if (blockedRel) return res.status(403).json({ error: 'Cannot react to this post' });
 
-    // Upsert reaction (if exists delete -> toggle behavior not desired for emoji; allow multiple emojis)
-    const exists = await prisma.postReaction.findUnique({ where: { postId_userId_emoji: { postId: req.params.postId, userId: me.id, emoji: parsed.data.emoji } } }).catch(() => null);
-    if (exists) {
-      await prisma.postReaction.delete({ where: { id: exists.id } });
-      const count = await prisma.postReaction.count({ where: { postId: req.params.postId } });
-      return res.json({ reacted: false, count });
+    try {
+      await prisma.postReaction.upsert({
+        where: {
+          postId_userId_emoji: {
+            postId: req.params.postId,
+            userId: me.id,
+            emoji: parsed.data.emoji,
+          },
+        },
+        update: {},
+        create: {
+          postId: req.params.postId,
+          userId: me.id,
+          emoji: parsed.data.emoji,
+        },
+      });
+    } catch (err) {
+      if (hasPrismaCode(err, 'P2003')) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+      throw err;
     }
-
-    await prisma.postReaction.create({ data: { postId: req.params.postId, userId: me.id, emoji: parsed.data.emoji } });
     const count = await prisma.postReaction.count({ where: { postId: req.params.postId } });
 
     // Notify post author
@@ -284,17 +352,25 @@ router.post('/follow/:userId', authenticateToken, async (req: AuthenticatedReque
     if (!me) return res.status(404).json({ error: 'User not found' });
     if (me.id === req.params.userId) return res.status(400).json({ error: 'Cannot follow yourself' });
 
+    const [target, blocked] = await Promise.all([
+      prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } }),
+      prisma.block.findFirst({ where: { OR: [ { blockerId: me.id, blockedId: req.params.userId }, { blockerId: req.params.userId, blockedId: me.id } ] } }),
+    ]);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (blocked) return res.status(403).json({ error: 'Cannot follow due to block relationship' });
+
+    const existing = await prisma.follow.findUnique({ where: { followerId_followingId: { followerId: me.id, followingId: req.params.userId } } }).catch(() => null);
     await prisma.follow.upsert({
       where: { followerId_followingId: { followerId: me.id, followingId: req.params.userId } },
       update: {},
       create: { followerId: me.id, followingId: req.params.userId },
     });
 
-    const notif = await prisma.notification.create({
-      data: { userId: req.params.userId, type: 'NEW_FOLLOWER', actorId: me.id },
-    });
-    const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
-    emitNotification(req.params.userId, { ...notif, actor });
+    if (!existing) {
+      const notif = await prisma.notification.create({ data: { userId: req.params.userId, type: 'NEW_FOLLOWER', actorId: me.id } });
+      const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
+      emitNotification(req.params.userId, { ...notif, actor });
+    }
 
     res.json({ following: true });
   } catch (err: any) {
@@ -324,6 +400,8 @@ router.post('/block/:userId', authenticateToken, async (req: AuthenticatedReques
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     if (me.id === req.params.userId) return res.status(400).json({ error: 'Cannot block yourself' });
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: 'User not found' });
 
     await prisma.block.upsert({
       where: { blockerId_blockedId: { blockerId: me.id, blockedId: req.params.userId } },
@@ -365,6 +443,8 @@ router.post('/reports', authenticateToken, async (req: AuthenticatedRequest, res
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
     if (me.id === parsed.data.reportedId) return res.status(400).json({ error: 'Cannot report yourself' });
+    const target = await prisma.user.findUnique({ where: { id: parsed.data.reportedId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: 'User not found' });
 
     const report = await prisma.report.create({ data: { reporterId: me.id, reportedId: parsed.data.reportedId, reason: parsed.data.reason as any, description: parsed.data.description } });
     res.status(201).json({ report });
@@ -491,15 +571,27 @@ type RawPost = {
   caption: string | null; thumbnailUrl?: string | null; createdAt: Date; updatedAt: Date;
   parentPostId?: string | null;
   author: { id: string; firstName: string; profilePictures: string[]; isVerified: boolean; profileVideo?: string | null };
+  reactions: { emoji: string; userId: string }[];
   _count: { reactions: number; replies: number };
 };
 
 function formatPost(p: RawPost, myId: string) {
+  const reactions = p.reactions.reduce<Record<string, number>>((counts, reaction) => {
+    counts[reaction.emoji] = (counts[reaction.emoji] ?? 0) + 1;
+    return counts;
+  }, {});
+  const viewerReactions = p.reactions
+    .filter((reaction) => reaction.userId === myId)
+    .map((reaction) => reaction.emoji);
+
   return {
     id: p.id, authorId: p.authorId, author: p.author,
     videoUrl: p.videoUrl, thumbnailUrl: p.thumbnailUrl ?? undefined,
     caption: p.caption ?? undefined,
-    reactionCount: p._count.reactions, replyCount: p._count.replies,
+    reactionCount: p._count.reactions,
+    reactions,
+    viewerReactions,
+    replyCount: p._count.replies,
     parentPostId: p.parentPostId ?? null,
     createdAt: p.createdAt.toISOString(),
   };

@@ -1,12 +1,19 @@
-// Shared TypeScript interfaces for Codex OpenAPI v0.1
+// Finalized v0.1 social integration contract for Claude.
+
+export interface AuthorSummary {
+  id: string;
+  firstName: string;
+  profilePictures: string[];
+  isVerified: boolean;
+  profileVideo?: string | null;
+}
+
 export interface User {
   id: string;
   firebaseUid: string;
   email: string;
   firstName: string;
   lastName: string;
-  username?: string;
-  displayName?: string;
   dateOfBirth?: string;
   gender?: string;
   location?: string;
@@ -24,42 +31,99 @@ export interface User {
 export interface Post {
   id: string;
   authorId: string;
+  author: AuthorSummary;
   videoUrl: string;
-  caption?: string | null;
   thumbnailUrl?: string | null;
-  visibility: 'public' | 'unlisted' | 'private';
-  createdAt: string;
-  parentPostId?: string | null;
+  caption?: string | null;
+  reactionCount: number;
+  reactions: Record<string, number>;
+  viewerReactions: string[];
   replyCount: number;
-  reactions: Reaction[];
-  moderationStatus: 'pending' | 'approved' | 'rejected' | 'flagged';
+  parentPostId: string | null;
+  createdAt: string;
 }
 
 export interface CreatePostRequest {
   videoUrl: string;
-  caption?: string | null;
   thumbnailUrl?: string | null;
+  caption?: string | null;
   parentPostId?: string | null;
 }
 
-export interface Reaction {
+export interface CreatePostResponse {
+  post: Post;
+}
+
+export interface PaginatedPostsResponse {
+  posts: Post[];
+  nextCursor: string | null;
+}
+
+export interface PaginatedRepliesResponse {
+  replies: Post[];
+  nextCursor: string | null;
+}
+
+export interface ReactionRequest {
   emoji: string;
-  userId: string;
-  createdAt: string;
 }
 
-// Note: v0.1 uses the existing multer upload endpoints; signed-upload types omitted
-
-export interface ErrorResponse {
-  code: string;
-  message: string;
+export interface ReactionResponse {
+  reacted: boolean;
+  count: number;
 }
+
+export interface FollowResponse {
+  following: boolean;
+}
+
+export interface BlockResponse {
+  blocked: boolean;
+}
+
+export interface FollowStatusResponse {
+  isFollowing: boolean;
+  followerCount: number;
+  followingCount: number;
+}
+
+export type ReportReason =
+  | 'INAPPROPRIATE_CONTENT'
+  | 'HARASSMENT'
+  | 'FAKE_PROFILE'
+  | 'SPAM'
+  | 'UNDERAGE'
+  | 'OTHER';
 
 export interface ReportRequest {
-  postId: string;
-  reason: string;
+  reportedId: string;
+  reason: ReportReason;
+  description?: string;
 }
 
-export interface FollowRequest {
-  action: 'follow' | 'unfollow';
+export interface Report {
+  id: string;
+  reporterId: string;
+  reportedId: string;
+  reason: ReportReason;
+  description?: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportResponse {
+  report: Report;
+}
+
+export interface UploadPostMediaResponse {
+  url: string;
+}
+
+export interface SuccessResponse {
+  success: boolean;
+}
+
+export interface ErrorResponse {
+  error: string;
 }
