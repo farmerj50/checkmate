@@ -1,62 +1,46 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Heart, MessageCircle, Loader2, Send } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { api } from '../lib/api';
+import { ArrowLeft, Video } from 'lucide-react';
+import { socialService, type SocialPost } from '../services/social';
+import { useAsync } from '../hooks/useAsync';
 import { normalizeAssetUrl } from '../utils/helpers';
-import type { Post, SocialComment } from '../types';
+import AsyncState from '../components/ui/AsyncState';
+import ReactionBar from '../components/social/ReactionBar';
+import ReplyRecorderModal from '../components/social/ReplyRecorderModal';
 
 export default function PostDetail() {
   const { postId } = useParams<{ postId: string }>();
-  const navigate   = useNavigate();
-  const inputRef   = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [localReplies, setLocalReplies] = useState<SocialPost[] | null>(null);
 
-  const [post]                    = useState<Post | null>(null);
-  const [comments, setComments]   = useState<SocialComment[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [liked, setLiked]         = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
-  const [text, setText]           = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!postId) return;
-    Promise.all([
-      api.get<{ posts: Post[] }>(`/social/posts/user/placeholder`).catch(() => null),
-      api.get<{ count: number; isLikedByMe: boolean }>(`/social/posts/${postId}/likes`),
-      api.get<{ comments: SocialComment[] }>(`/social/posts/${postId}/comments`),
-    ]).then(([, likesData, commentsData]) => {
-      setLiked(likesData.isLikedByMe);
-      setLikeCount(likesData.count);
-      setComments(commentsData.comments);
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [postId]);
-
-  async function toggleLike() {
-    if (!postId) return;
-    const next = !liked;
-    setLiked(next);
-    setLikeCount((c) => c + (next ? 1 : -1));
-    try { await api.post(`/social/posts/${postId}/like`, {}); }
-    catch { setLiked(!next); setLikeCount((c) => c + (next ? -1 : 1)); }
-  }
-
-  async function submit() {
-    if (!text.trim() || submitting || !postId) return;
-    setSubmitting(true);
-    try {
-      const { comment } = await api.post<{ comment: SocialComment }>(`/social/posts/${postId}/comments`, { content: text.trim() });
-      setComments((prev) => [comment, ...prev]);
-      setText('');
-    } catch { /* silent */ }
-    finally { setSubmitting(false); }
-  }
-
-  if (loading) return (
-    <div className="min-h-screen bg-[#050508] flex items-center justify-center">
-      <Loader2 className="w-8 h-8 text-[#ff4d8d] animate-spin" />
-    </div>
+  const postState = useAsync(
+    () => (postId ? socialService.getPost(postId) : Promise.resolve(null)),
+    [postId]
   );
+  const repliesState = useAsync(
+    () => (postId ? socialService.getReplies(postId) : Promise.resolve({ items: [], nextCursor: null })),
+    [postId]
+  );
+
+  const [localPost, setLocalPost] = useState<SocialPost | null>(null);
+  useEffect(() => setLocalPost(postState.data ?? null), [postState.data]);
+  useEffect(() => setLocalReplies(null), [postId]);
+
+  const post = localPost;
+  const replies = localReplies ?? repliesState.data?.items ?? [];
+
+  function handlePostChange(updated: SocialPost) {
+    setLocalPost(updated);
+  }
+
+  function handleReplyChange(updated: SocialPost) {
+    setLocalReplies((replies).map((r) => (r.id === updated.id ? updated : r)));
+  }
+
+  function handleReplyCreated(reply: SocialPost) {
+    setLocalReplies([...(localReplies ?? repliesState.data?.items ?? []), reply]);
+  }
 
   return (
     <div className="min-h-screen bg-[#050508] flex flex-col pb-safe">
@@ -68,70 +52,93 @@ export default function PostDetail() {
         <span className="text-white font-semibold">Post</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {/* Media */}
-        <div className="bg-black flex items-center justify-center" style={{ height: '50vh' }}>
-          {post?.mediaType === 'VIDEO' ? (
-            <video src={normalizeAssetUrl(post.mediaUrl) ?? ''} className="h-full w-full object-contain" autoPlay loop muted playsInline />
-          ) : post ? (
-            <img src={normalizeAssetUrl(post.mediaUrl) ?? ''} alt="" className="h-full w-full object-contain" />
-          ) : null}
-        </div>
+      <AsyncState
+        loading={postState.status === 'loading'}
+        error={postState.error}
+        empty={postState.status === 'success' && !post}
+        emptyMessage="This post isn't available."
+        errorMessage="Couldn't load this post."
+        onRetry={postState.reload}
+      >
+        {post && (
+          <div className="flex-1 overflow-y-auto">
+            {/* Media */}
+            <div className="bg-black flex items-center justify-center" style={{ height: '50vh' }}>
+              <video
+                src={normalizeAssetUrl(post.videoUrl) ?? ''}
+                className="h-full w-full object-contain"
+                autoPlay loop muted playsInline
+              />
+            </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-5 px-4 py-3 border-b border-white/5">
-          <button onClick={toggleLike} className="flex items-center gap-1.5">
-            <motion.div whileTap={{ scale: 1.3 }}>
-              <Heart className={`w-6 h-6 transition-colors ${liked ? 'text-[#ff4d8d] fill-[#ff4d8d]' : 'text-white/70'}`} />
-            </motion.div>
-            <span className="text-white/60 text-sm">{likeCount > 0 ? likeCount : ''}</span>
-          </button>
-          <button onClick={() => inputRef.current?.focus()} className="flex items-center gap-1.5">
-            <MessageCircle className="w-6 h-6 text-white/70" />
-            <span className="text-white/60 text-sm">{comments.length > 0 ? comments.length : ''}</span>
-          </button>
-        </div>
+            {/* Author + caption */}
+            <div className="px-4 py-3 border-b border-white/5">
+              <button onClick={() => navigate(`/profile/${post.authorId}`)} className="text-white font-semibold text-sm">
+                {post.author.firstName}
+              </button>
+              {post.caption && <p className="text-white/70 text-sm mt-1">{post.caption}</p>}
+            </div>
 
-        {/* Comments */}
-        <div className="px-4 py-3 space-y-4">
-          {comments.length === 0 && (
-            <p className="text-white/30 text-sm text-center py-4">No comments yet</p>
-          )}
-          {comments.map((c) => {
-            const avatar = normalizeAssetUrl(c.author.profilePictures?.[0]);
-            return (
-              <div key={c.id} className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-white/10 flex-none overflow-hidden">
-                  {avatar && <img src={avatar} alt="" className="w-full h-full object-cover" />}
+            {/* Actions */}
+            <div className="flex items-center gap-5 px-4 py-3 border-b border-white/5">
+              <ReactionBar post={post} onChange={handlePostChange} variant="inline" />
+              <button onClick={() => setRecorderOpen(true)} className="flex items-center gap-1.5">
+                <Video className="w-5 h-5 text-white/70" />
+                <span className="text-white/60 text-sm">{replies.length > 0 ? replies.length : 'Reply'}</span>
+              </button>
+            </div>
+
+            {/* Video replies */}
+            <div className="px-4 py-3">
+              <p className="text-white/40 text-xs font-semibold uppercase tracking-wide mb-3">Video replies</p>
+              <AsyncState
+                loading={repliesState.status === 'loading'}
+                error={repliesState.error}
+                empty={repliesState.status === 'success' && replies.length === 0}
+                emptyMessage="No video replies yet. Be the first."
+                errorMessage="Couldn't load replies."
+                onRetry={repliesState.reload}
+              >
+                <div className="space-y-4">
+                  {replies.map((reply) => (
+                    <ReplyCard key={reply.id} reply={reply} onChange={handleReplyChange} />
+                  ))}
                 </div>
-                <div>
-                  <span className="text-white text-xs font-semibold mr-1.5">{c.author.firstName}</span>
-                  <span className="text-white/70 text-sm">{c.content}</span>
-                  <p className="text-white/25 text-[10px] mt-0.5">
-                    {new Date(c.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                  </p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+              </AsyncState>
+            </div>
+          </div>
+        )}
+      </AsyncState>
 
-      {/* Comment input */}
-      <div className="flex items-center gap-3 px-4 py-3 border-t border-white/8 flex-none">
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="Add a comment…"
-          maxLength={500}
-          className="flex-1 bg-white/8 border border-white/10 rounded-full px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:border-[#ff4d8d]/40"
+      {recorderOpen && postId && (
+        <ReplyRecorderModal
+          parentPostId={postId}
+          onClose={() => setRecorderOpen(false)}
+          onCreated={handleReplyCreated}
         />
-        <button onClick={submit} disabled={!text.trim() || submitting}
-          className="w-9 h-9 rounded-full bg-gradient-to-r from-[#ff4d8d] to-[#8b5cf6] flex items-center justify-center disabled:opacity-40">
-          {submitting ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
-        </button>
+      )}
+    </div>
+  );
+}
+
+function ReplyCard({ reply, onChange }: { reply: SocialPost; onChange: (r: SocialPost) => void }) {
+  const navigate = useNavigate();
+  const avatar = normalizeAssetUrl(reply.author.profilePictures?.[0]);
+  const media = normalizeAssetUrl(reply.videoUrl);
+
+  return (
+    <div className="flex items-start gap-3">
+      <button onClick={() => navigate(`/profile/${reply.authorId}`)} className="w-9 h-9 rounded-full bg-white/10 flex-none overflow-hidden">
+        {avatar && <img src={avatar} alt="" className="w-full h-full object-cover" />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <span className="text-white text-xs font-semibold">{reply.author.firstName}</span>
+        <div className="mt-1.5 rounded-xl overflow-hidden bg-black aspect-[9/16] max-w-[160px]">
+          <video src={media ?? ''} className="w-full h-full object-cover" muted loop playsInline controls />
+        </div>
+        <div className="mt-1.5">
+          <ReactionBar post={reply} onChange={onChange} variant="inline" />
+        </div>
       </div>
     </div>
   );

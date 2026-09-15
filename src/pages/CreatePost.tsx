@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Video, ImageIcon, Sparkles, Loader2, X, Camera, Upload } from 'lucide-react';
+import { ArrowLeft, Sparkles, Loader2, X, Camera, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../lib/firebase';
 import VideoRecorder from '../components/VideoRecorder';
+import { socialService } from '../services/social';
 
 type Step = 'pick' | 'preview' | 'publishing';
 type Mode = 'record' | 'upload';
@@ -22,7 +23,6 @@ export default function CreatePost() {
   const [mode, setMode]             = useState<Mode>('record');
   const [file, setFile]             = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [mediaType, setMediaType]   = useState<'VIDEO' | 'IMAGE'>('VIDEO');
   const [caption, setCaption]       = useState(promptContext ? `Responding to: "${promptContext}" — ` : '');
   const [aiLoading, setAiLoading]   = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
@@ -31,8 +31,11 @@ export default function CreatePost() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
+    if (!f.type.startsWith('video/')) {
+      toast.error('Please choose a video file.');
+      return;
+    }
     setFile(f);
-    setMediaType(f.type.startsWith('video/') ? 'VIDEO' : 'IMAGE');
     setPreviewUrl(URL.createObjectURL(f));
     setStep('preview');
   }
@@ -40,7 +43,6 @@ export default function CreatePost() {
   function handleRecordingComplete(blob: Blob) {
     const f = new File([blob], `post-${Date.now()}.webm`, { type: 'video/webm' });
     setFile(f);
-    setMediaType('VIDEO');
     setPreviewUrl(URL.createObjectURL(blob));
     setStep('preview');
   }
@@ -74,6 +76,8 @@ export default function CreatePost() {
     setPublishing(true);
     setStep('publishing');
     try {
+      // Upload stays on the existing, stable multer endpoint — that's not part
+      // of the social contract Codex is reconciling, so it isn't mocked here.
       const token = localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
       const formData = new FormData();
       formData.append('media', file);
@@ -84,7 +88,7 @@ export default function CreatePost() {
       });
       const { url, error: uploadError } = await uploadRes.json();
       if (!uploadRes.ok) throw new Error(uploadError ?? 'Upload failed');
-      await api.post('/social/posts', { mediaUrl: url, mediaType, caption: caption.trim() || undefined });
+      await socialService.createPost({ videoUrl: url, caption: caption.trim() || undefined });
       toast.success('Post published!');
       navigate('/home');
     } catch (err: any) {
@@ -165,13 +169,13 @@ export default function CreatePost() {
                 </div>
               )}
 
-              {/* Upload mode */}
+              {/* Upload mode — video only, per the video-first v0.1 contract */}
               {mode === 'upload' && (
                 <>
                   <input
                     ref={fileRef}
                     type="file"
-                    accept="video/*,image/*"
+                    accept="video/*"
                     className="hidden"
                     onChange={handleFileChange}
                   />
@@ -179,13 +183,10 @@ export default function CreatePost() {
                     onClick={() => fileRef.current?.click()}
                     className="w-full flex flex-col items-center justify-center gap-4 py-14 border-2 border-dashed border-white/12 rounded-2xl bg-white/3 hover:bg-white/5 hover:border-white/20 active:scale-[0.98] transition-all"
                   >
-                    <div className="flex gap-5 opacity-35">
-                      <Video className="w-9 h-9 text-white" />
-                      <ImageIcon className="w-9 h-9 text-white" />
-                    </div>
+                    <Camera className="w-9 h-9 text-white opacity-35" />
                     <div className="text-center">
                       <p className="text-white/60 text-sm font-medium">Tap to choose</p>
-                      <p className="text-white/30 text-xs mt-1">Video or photo from your library</p>
+                      <p className="text-white/30 text-xs mt-1">Video from your library</p>
                     </div>
                     <div className="px-5 py-2 rounded-full bg-white/8 border border-white/10 text-white/50 text-xs font-semibold">
                       Browse files
@@ -207,11 +208,7 @@ export default function CreatePost() {
             >
               {/* Media preview — 9:16 card */}
               <div className="relative rounded-2xl overflow-hidden bg-black border border-white/8" style={{ aspectRatio: '9/16', maxHeight: '52vh' }}>
-                {mediaType === 'VIDEO' ? (
-                  <video src={previewUrl} className="w-full h-full object-contain" muted loop autoPlay playsInline />
-                ) : (
-                  <img src={previewUrl} alt="" className="w-full h-full object-contain" />
-                )}
+                <video src={previewUrl} className="w-full h-full object-contain" muted loop autoPlay playsInline />
                 <button
                   onClick={resetToPickStep}
                   className="absolute top-3 right-3 w-8 h-8 bg-black/60 backdrop-blur-md rounded-full flex items-center justify-center"
@@ -219,9 +216,7 @@ export default function CreatePost() {
                   <X className="w-4 h-4 text-white" />
                 </button>
                 <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-sm">
-                  <span className="text-white/70 text-xs font-medium">
-                    {mediaType === 'VIDEO' ? '🎥 Video' : '🖼 Photo'}
-                  </span>
+                  <span className="text-white/70 text-xs font-medium">🎥 Video</span>
                 </div>
               </div>
 
@@ -308,7 +303,7 @@ export default function CreatePost() {
               </div>
               <div className="text-center">
                 <p className="text-white font-semibold mb-1">Publishing…</p>
-                <p className="text-white/40 text-sm">Uploading your {mediaType === 'VIDEO' ? 'video' : 'photo'}</p>
+                <p className="text-white/40 text-sm">Uploading your video</p>
               </div>
             </motion.div>
           )}

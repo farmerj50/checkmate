@@ -12,11 +12,13 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { api } from '../lib/api';
 import { auth } from '../lib/firebase';
-import type { User, Post } from '../types';
+import type { User } from '../types';
+import { socialService, type SocialPost } from '../services/social';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import VideoRecorder from '../components/VideoRecorder';
 import VideoEditorModal from '../components/VideoEditorModal';
+import AsyncState from '../components/ui/AsyncState';
 import { calculateAge, normalizeAssetUrl } from '../utils/helpers';
 
 const INTERESTS = [
@@ -705,29 +707,62 @@ export default function Profile() {
   const [verifying, setVerifying] = useState(false);
   const verifyInputRef = useRef<HTMLInputElement>(null);
   const [profileTab, setProfileTab] = useState<'dating' | 'posts'>('dating');
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [postsStatus, setPostsStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [postsError, setPostsError] = useState<Error | null>(null);
+  const [postsCursor, setPostsCursor] = useState<string | null>(null);
+  const [postsHasMore, setPostsHasMore] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [followCounts, setFollowCounts] = useState<{ followers: number; following: number }>({ followers: 0, following: 0 });
 
+  function loadPosts(uid: string) {
+    setPostsStatus('loading');
+    setPostsError(null);
+    // Identity (/users/profile) is the existing, stable account endpoint —
+    // untouched. Posts + follow status go through SocialService.
+    Promise.all([
+      socialService.getUserPosts(uid),
+      socialService.getFollowStatus(uid),
+    ]).then(([postsPage, fs]) => {
+      setPosts(postsPage.items);
+      setPostsCursor(postsPage.nextCursor);
+      setPostsHasMore(!!postsPage.nextCursor);
+      setFollowCounts({ followers: fs.followerCount, following: fs.followingCount });
+      setPostsStatus('success');
+    }).catch((err) => {
+      setPostsError(err instanceof Error ? err : new Error(String(err)));
+      setPostsStatus('error');
+    });
+  }
+
+  async function loadMorePosts() {
+    if (!user || !postsCursor || loadingMorePosts) return;
+    setLoadingMorePosts(true);
+    try {
+      const page = await socialService.getUserPosts(user.id, postsCursor);
+      setPosts((prev) => [...prev, ...page.items]);
+      setPostsCursor(page.nextCursor);
+      setPostsHasMore(!!page.nextCursor);
+    } catch {
+      toast.error('Could not load more posts');
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  }
+
   useEffect(() => {
     api.get<{ user: User }>('/users/profile').then((d) => {
       setUser(d.user);
-      const uid = d.user.id;
-      Promise.all([
-        api.get<{ posts: Post[] }>(`/social/posts/user/${uid}`),
-        api.get<{ followerCount: number; followingCount: number; isFollowing: boolean }>(`/social/users/${uid}/follow-status`),
-      ]).then(([postsData, fs]) => {
-        setPosts(postsData.posts);
-        setFollowCounts({ followers: fs.followerCount, following: fs.followingCount });
-      }).catch(() => {});
+      loadPosts(d.user.id);
     }).catch(() => toast.error('Failed to load profile')).finally(() => setLoading(false));
   }, []);
 
   async function deletePost(postId: string) {
     setDeletingId(postId);
     try {
-      await api.delete(`/social/posts/${postId}`);
+      await socialService.deletePost(postId);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
       toast.success('Post deleted');
     } catch {
@@ -1005,7 +1040,13 @@ export default function Profile() {
 
         {/* Posts grid */}
         {profileTab === 'posts' && (
-          <div>
+          <AsyncState
+            loading={postsStatus === 'loading'}
+            error={postsError}
+            errorMessage="Couldn't load your posts."
+            onRetry={() => user && loadPosts(user.id)}
+            empty={false}
+          >
             {posts.length === 0 ? (
               <div className="text-center py-16 rounded-3xl bg-white/3 border border-white/5">
                 <Grid3x3 className="w-10 h-10 text-white/15 mx-auto mb-3" />
@@ -1035,7 +1076,7 @@ export default function Profile() {
               </div>
               <div className="grid grid-cols-3 gap-0.5 rounded-2xl overflow-hidden">
                 {posts.map((p, i) => {
-                  const media = normalizeAssetUrl(p.mediaUrl);
+                  const media = normalizeAssetUrl(p.videoUrl);
                   const isDeleting = deletingId === p.id;
                   return (
                     <motion.div
@@ -1049,11 +1090,7 @@ export default function Profile() {
                         onClick={() => !deleteMode && navigate(`/post/${p.id}`)}
                         className="w-full h-full"
                       >
-                        {p.mediaType === 'VIDEO' ? (
-                          <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
-                        ) : (
-                          <img src={media ?? ''} alt="" className="w-full h-full object-cover" />
-                        )}
+                        <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
                       </button>
                       {deleteMode && (
                         <button
@@ -1074,9 +1111,20 @@ export default function Profile() {
                   );
                 })}
               </div>
+              {postsHasMore && (
+                <div className="flex justify-center mt-4">
+                  <button
+                    onClick={loadMorePosts}
+                    disabled={loadingMorePosts}
+                    className="px-5 py-2 rounded-full bg-white/8 border border-white/10 text-white/60 text-sm font-medium hover:text-white disabled:opacity-50 transition-colors"
+                  >
+                    {loadingMorePosts ? 'Loading…' : 'Load more'}
+                  </button>
+                </div>
+              )}
               </>
             )}
-          </div>
+          </AsyncState>
         )}
 
         {profileTab === 'dating' && <>

@@ -1,19 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Heart, MessageCircle, BadgeCheck, Loader2, PlusSquare, Bell } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import toast from 'react-hot-toast';
+import { BadgeCheck, Loader2, PlusSquare, Bell, Video } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { getSocket } from '../lib/socket';
 import { normalizeAssetUrl } from '../utils/helpers';
-import CommentSheet from '../components/CommentSheet';
-import type { Post, DailyPrompt } from '../types';
-
-interface FeedPost extends Post {
-  liked: boolean;
-  count: number;
-}
+import ReactionBar from '../components/social/ReactionBar';
+import ReplyThread from '../components/social/ReplyThread';
+import { socialService, type SocialPost } from '../services/social';
+import type { DailyPrompt } from '../types';
 
 function useNotificationCount() {
   const { dbUser } = useAuth();
@@ -23,7 +18,7 @@ function useNotificationCount() {
 
   useEffect(() => {
     if (!dbUser) return;
-    api.get<{ count: number }>('/social/notifications/unread-count').then((d) => setCount(d.count)).catch(() => {});
+    socialService.getUnreadNotificationCount().then(setCount).catch(() => {});
     let mounted = true;
     getSocket().then((socket) => {
       if (!mounted) return;
@@ -45,26 +40,28 @@ export default function HomeFeed() {
   const containerRef = useRef<HTMLDivElement>(null);
   const loaderRef = useRef<HTMLDivElement>(null);
 
-  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [posts, setPosts] = useState<SocialPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<Error | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [dailyPrompt, setDailyPrompt] = useState<DailyPrompt | null>(null);
-  const [commentPostId, setCommentPostId] = useState<string | null>(null);
+  const [repliesPostId, setRepliesPostId] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const notifCount = useNotificationCount();
 
   const fetchFeed = useCallback(async (cur?: string) => {
     try {
-      const params = cur ? `?cursor=${cur}` : '';
-      const data = await api.get<{ posts: Post[]; nextCursor: string | null }>(`/social/posts/feed${params}`);
-      const mapped: FeedPost[] = data.posts.map((p) => ({ ...p, liked: p.isLikedByMe, count: p.likeCount }));
-      if (cur) setPosts((prev) => [...prev, ...mapped]);
-      else setPosts(mapped);
-      setCursor(data.nextCursor);
-      setHasMore(!!data.nextCursor && data.posts.length > 0);
-    } catch { /* silent */ }
+      setLoadError(null);
+      const { items, nextCursor } = await socialService.getFeed(cur);
+      if (cur) setPosts((prev) => [...prev, ...items]);
+      else setPosts(items);
+      setCursor(nextCursor);
+      setHasMore(!!nextCursor && items.length > 0);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err : new Error(String(err)));
+    }
   }, []);
 
   useEffect(() => {
@@ -111,22 +108,28 @@ export default function HomeFeed() {
     return () => obs.disconnect();
   }, [cursor, hasMore, loadingMore, fetchFeed]);
 
-  async function toggleLike(postIdx: number) {
-    const post = posts[postIdx];
-    const next = !post.liked;
-    setPosts((prev) => prev.map((p, i) => i === postIdx ? { ...p, liked: next, count: p.count + (next ? 1 : -1) } : p));
-    try {
-      await api.post(`/social/posts/${post.id}/like`, {});
-    } catch {
-      setPosts((prev) => prev.map((p, i) => i === postIdx ? { ...p, liked: !next, count: p.count + (next ? -1 : 1) } : p));
-      toast.error('Failed to like');
-    }
+  function handlePostChange(updated: SocialPost) {
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   }
 
   if (loading) {
     return (
       <div className="h-screen bg-[#050508] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-[#ff4d8d] animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="h-screen bg-[#050508] flex flex-col items-center justify-center gap-3 px-8 text-center">
+        <p className="text-white/50 text-sm">Couldn't load your feed.</p>
+        <button
+          onClick={() => { setLoading(true); fetchFeed().finally(() => setLoading(false)); }}
+          className="text-[#ff4d8d] text-sm font-semibold"
+        >
+          Try again
+        </button>
       </div>
     );
   }
@@ -185,8 +188,8 @@ export default function HomeFeed() {
               post={post}
               slideIndex={idx + promptOffset}
               isActive={activeIndex === idx + promptOffset}
-              onLike={() => toggleLike(idx)}
-              onComment={() => setCommentPostId(post.id)}
+              onChange={handlePostChange}
+              onReply={() => setRepliesPostId(post.id)}
               onNavigateProfile={() => navigate(`/profile/${post.authorId}`)}
             />
           ))
@@ -202,19 +205,13 @@ export default function HomeFeed() {
         </div>
       </div>
 
-      {/* Comment Sheet */}
-      <AnimatePresence>
-        {commentPostId && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[299] bg-black/60"
-              onClick={() => setCommentPostId(null)}
-            />
-            <CommentSheet postId={commentPostId} onClose={() => setCommentPostId(null)} />
-          </>
-        )}
-      </AnimatePresence>
+      {/* Video reply thread */}
+      {repliesPostId && (
+        <>
+          <div className="fixed inset-0 z-[299] bg-black/60" onClick={() => setRepliesPostId(null)} />
+          <ReplyThread postId={repliesPostId} onClose={() => setRepliesPostId(null)} />
+        </>
+      )}
     </div>
   );
 }
@@ -256,17 +253,17 @@ function PromptSlide({ prompt, slideIndex }: { prompt: DailyPrompt; slideIndex: 
 
 // ── Post Slide ────────────────────────────────────────────────────────────────
 function PostSlide({
-  post, slideIndex, isActive, onLike, onComment, onNavigateProfile,
+  post, slideIndex, isActive, onChange, onReply, onNavigateProfile,
 }: {
-  post: FeedPost;
+  post: SocialPost;
   slideIndex: number;
   isActive: boolean;
-  onLike: () => void;
-  onComment: () => void;
+  onChange: (updated: SocialPost) => void;
+  onReply: () => void;
   onNavigateProfile: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const media  = normalizeAssetUrl(post.mediaUrl);
+  const media  = normalizeAssetUrl(post.videoUrl);
   const avatar = normalizeAssetUrl(post.author.profilePictures?.[0]);
 
   useEffect(() => {
@@ -292,18 +289,14 @@ function PostSlide({
           className="relative flex-none bg-black rounded-2xl overflow-hidden shadow-2xl"
           style={{ aspectRatio: '9/16', height: '100%' }}
         >
-          {post.mediaType === 'VIDEO' ? (
-            <video
-              ref={videoRef}
-              src={media ?? ''}
-              className="absolute inset-0 w-full h-full object-cover"
-              loop
-              muted
-              playsInline
-            />
-          ) : (
-            <img src={media ?? ''} alt="" className="absolute inset-0 w-full h-full object-cover" />
-          )}
+          <video
+            ref={videoRef}
+            src={media ?? ''}
+            className="absolute inset-0 w-full h-full object-cover"
+            loop
+            muted
+            playsInline
+          />
 
           {/* Bottom gradient */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent pointer-events-none" />
@@ -330,20 +323,13 @@ function PostSlide({
 
         {/* Action buttons — RIGHT of card, bottom-aligned */}
         <div className="flex flex-col items-center gap-5 pb-5 flex-none">
-          <button onClick={onLike} className="flex flex-col items-center gap-1.5">
-            <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">
-              <motion.div whileTap={{ scale: 1.25 }}>
-                <Heart className={`w-5 h-5 ${post.liked ? 'text-[#ff4d8d] fill-[#ff4d8d]' : 'text-white'}`} />
-              </motion.div>
-            </div>
-            <span className="text-white/60 text-[11px]">{post.count > 0 ? post.count.toLocaleString() : 'Like'}</span>
-          </button>
+          <ReactionBar post={post} onChange={onChange} variant="rail" />
 
-          <button onClick={onComment} className="flex flex-col items-center gap-1.5">
+          <button onClick={onReply} className="flex flex-col items-center gap-1.5">
             <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">
-              <MessageCircle className="w-5 h-5 text-white" />
+              <Video className="w-5 h-5 text-white" />
             </div>
-            <span className="text-white/60 text-[11px]">{post.commentCount > 0 ? post.commentCount.toLocaleString() : 'Comments'}</span>
+            <span className="text-white/60 text-[11px]">{post.replyCount > 0 ? post.replyCount.toLocaleString() : 'Reply'}</span>
           </button>
         </div>
       </div>

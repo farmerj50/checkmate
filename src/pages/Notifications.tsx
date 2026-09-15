@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Loader2, Heart, UserPlus, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { api } from '../lib/api';
 import { normalizeAssetUrl } from '../utils/helpers';
 import { getSocket } from '../lib/socket';
 import { useAuth } from '../contexts/AuthContext';
+import { socialService } from '../services/social';
 import type { SocialNotification } from '../types';
 
 const TYPE_META: Record<SocialNotification['type'], { icon: typeof Heart; color: string; label: string }> = {
@@ -23,13 +23,13 @@ export default function Notifications() {
   const socketRef = useRef<Awaited<ReturnType<typeof getSocket>> | null>(null);
 
   useEffect(() => {
-    api.get<{ notifications: SocialNotification[] }>('/social/notifications')
-      .then((d) => setNotifications(d.notifications))
+    socialService.getNotifications()
+      .then(setNotifications)
       .catch(() => {})
       .finally(() => setLoading(false));
 
     // Mark all read
-    api.put('/social/notifications/read-all', {}).catch(() => {});
+    socialService.markAllNotificationsRead().catch(() => {});
 
     // Real-time
     let mounted = true;
@@ -60,7 +60,7 @@ export default function Notifications() {
         {notifications.some((n) => !n.isRead) && (
           <button
             onClick={() => {
-              api.put('/social/notifications/read-all', {}).catch(() => {});
+              socialService.markAllNotificationsRead().catch(() => {});
               setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
             }}
             className="text-xs text-[#ff4d8d] font-semibold"
