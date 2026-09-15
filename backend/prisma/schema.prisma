@@ -249,6 +249,8 @@ model Post {
   thumbnailUrl     String?
   visibility       Visibility       @default(PUBLIC)
   parentPostId     String?
+  isDeleted        Boolean          @default(false)
+  deletedAt        DateTime?
   replyCount       Int              @default(0)
   moderationStatus ModerationStatus @default(PENDING)
   createdAt        DateTime         @default(now())
@@ -256,7 +258,9 @@ model Post {
 
   author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   reactions PostReaction[]
-  replies   Post[]         @relation("PostReplies", references: [id])
+  // Self-relation: a post may be a reply to another post
+  parent    Post?          @relation("PostReplies", fields: [parentPostId], references: [id])
+  replies   Post[]         @relation("PostReplies")
 
   @@index([authorId])
   @@index([createdAt])
