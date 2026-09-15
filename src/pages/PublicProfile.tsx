@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck, Loader2, Grid } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { ArrowLeft, BadgeCheck, Loader2, Grid, MoreVertical, Flag, Ban } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { socialService, type SocialPost } from '../services/social';
 import { normalizeAssetUrl, calculateAge } from '../utils/helpers';
 import FollowButton from '../components/FollowButton';
+import ReportModal from '../components/ReportModal';
 import type { FollowStatus } from '../types';
 
 interface ProfileUser {
@@ -29,6 +31,9 @@ export default function PublicProfile() {
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [followStatus, setFollowStatus] = useState<FollowStatus | null>(null);
   const [loading, setLoading]       = useState(true);
+  const [menuOpen, setMenuOpen]     = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [blocking, setBlocking]     = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -66,14 +71,70 @@ export default function PublicProfile() {
 
   const avatar = normalizeAssetUrl(user?.profilePictures?.[0]);
 
+  async function blockUser() {
+    if (!userId || !user) return;
+    setMenuOpen(false);
+    setBlocking(true);
+    try {
+      await socialService.block(userId);
+      toast.success(`${user.firstName} has been blocked`);
+      navigate(-1);
+    } catch {
+      toast.error('Could not block user. Try again.');
+    } finally {
+      setBlocking(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#050508] pb-20">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-[#050508]/90 backdrop-blur-md border-b border-white/5 px-4 py-4 flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-white/8">
-          <ArrowLeft className="w-5 h-5 text-white" />
-        </button>
-        <span className="text-white font-semibold">{user?.firstName ?? '…'}</span>
+      <div className="sticky top-0 z-10 bg-[#050508]/90 backdrop-blur-md border-b border-white/5 px-4 py-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-white/8 flex-none">
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          <span className="text-white font-semibold truncate">{user?.firstName ?? '…'}</span>
+        </div>
+
+        {user && (
+          <div className="relative flex-none">
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              disabled={blocking}
+              className="p-2 rounded-full bg-white/8 disabled:opacity-50"
+            >
+              <MoreVertical className="w-5 h-5 text-white/70" />
+            </button>
+            <AnimatePresence>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                    className="absolute right-0 top-12 bg-gray-900 rounded-2xl shadow-xl border border-white/10 w-44 py-1 z-20"
+                  >
+                    <button
+                      onClick={() => { setMenuOpen(false); setReportOpen(true); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/70 hover:bg-white/5"
+                    >
+                      <Flag className="w-4 h-4 text-red-400" /> Report user
+                    </button>
+                    <button
+                      onClick={blockUser}
+                      disabled={blocking}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                    >
+                      <Ban className="w-4 h-4" /> {blocking ? 'Blocking…' : 'Block user'}
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -176,6 +237,15 @@ export default function PublicProfile() {
             </div>
           )}
         </>
+      )}
+
+      {reportOpen && user && userId && (
+        <ReportModal
+          userId={userId}
+          userName={user.firstName}
+          onClose={() => setReportOpen(false)}
+          onBlocked={() => navigate(-1)}
+        />
       )}
     </div>
   );

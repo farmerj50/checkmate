@@ -68,7 +68,10 @@ export default function ReportModal({ userId, userName, onClose, onBlocked }: Pr
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4"
+        // z-[100]: must render above the persistent bottom Navigation bar
+        // (z-50) — they collided before, so taps meant for this modal's
+        // lower buttons (e.g. Submit Report) hit the nav underneath instead.
+        className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <motion.div
