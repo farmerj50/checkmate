@@ -880,7 +880,10 @@ export default function Discover() {
   const card = visibleCards[clampedIndex];
   const hasMore = visibleCards.length > 0;
 
-  const HEADER_H = 52;
+  // Matches the sidebar's brand-block height (px-6 py-5 + "CheckMate" +
+  // subtitle) so the content header and sidebar top read as one aligned
+  // strip instead of two independently-sized rows.
+  const HEADER_H = 84;
 
   return (
     <div className="fixed inset-0 bg-[#050508] flex">
@@ -913,8 +916,11 @@ export default function Discover() {
       {/* ── Main Content ── */}
       <div className="flex-1 relative bg-black">
 
-      {/* ── Header ── */}
-      <div className="absolute top-0 inset-x-0 z-20 bg-black flex items-center justify-between px-4"
+      {/* ── Header — aligned to the sidebar's brand-block height/padding
+          (px-6, same vertical rhythm) so it reads as a continuation of
+          that row rather than a separately-sized bar tacked on above the
+          feed. ── */}
+      <div className="absolute top-0 inset-x-0 z-20 bg-black border-b border-white/6 flex items-center justify-between px-6"
         style={{ height: HEADER_H }}>
         <div className="flex items-center gap-2">
           <Heart className="w-5 h-5 text-pink-500 fill-pink-500" />
@@ -977,7 +983,11 @@ export default function Discover() {
             </button>
           </div>
         ) : (
-          <div className="relative w-full max-w-[430px] h-full px-2 py-2">
+          // max-w grows one step on very wide monitors (2xl: 1536px+),
+          // still centered within this content area (w-full + the parent's
+          // justify-center) — already excludes the sidebar, since this
+          // whole area sits inside the flex-1 region after it.
+          <div className="relative w-full max-w-[430px] 2xl:max-w-[480px] h-full px-2 py-2">
             <AnimatePresence mode="wait" custom={direction}>
               <motion.div
                 key={card.user.id}
