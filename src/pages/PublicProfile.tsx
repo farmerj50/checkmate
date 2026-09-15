@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, BadgeCheck, Loader2, Grid } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api';
+import { socialService, type SocialPost } from '../services/social';
 import { normalizeAssetUrl, calculateAge } from '../utils/helpers';
 import FollowButton from '../components/FollowButton';
-import type { Post, FollowStatus } from '../types';
+import type { FollowStatus } from '../types';
 
 interface ProfileUser {
   id: string;
@@ -22,25 +23,46 @@ export default function PublicProfile() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const [user, setUser]             = useState<ProfileUser | null>(null);
-  const [posts, setPosts]           = useState<Post[]>([]);
+  const [posts, setPosts]           = useState<SocialPost[]>([]);
+  const [postsCursor, setPostsCursor] = useState<string | null>(null);
+  const [postsHasMore, setPostsHasMore] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [followStatus, setFollowStatus] = useState<FollowStatus | null>(null);
   const [loading, setLoading]       = useState(true);
 
   useEffect(() => {
     if (!userId) return;
     Promise.all([
-      api.get<{ user: ProfileUser }>(`/users/${userId}`),
-      api.get<{ posts: Post[] }>(`/social/posts/user/${userId}`),
-      api.get<FollowStatus>(`/social/users/${userId}/follow-status`),
+      // Profile identity stays on the existing, unrelated /users route.
+      api.get<{ user: ProfileUser }>(`/users/${userId}`).catch(() => null),
+      socialService.getUserPosts(userId),
+      socialService.getFollowStatus(userId),
     ])
-      .then(([userData, postsData, fs]) => {
-        setUser(userData.user);
-        setPosts(postsData.posts);
+      .then(([userData, postsPage, fs]) => {
+        setUser(userData?.user ?? null);
+        setPosts(postsPage.items);
+        setPostsCursor(postsPage.nextCursor);
+        setPostsHasMore(!!postsPage.nextCursor);
         setFollowStatus(fs);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [userId]);
+
+  async function loadMorePosts() {
+    if (!userId || !postsCursor || loadingMorePosts) return;
+    setLoadingMorePosts(true);
+    try {
+      const page = await socialService.getUserPosts(userId, postsCursor);
+      setPosts((prev) => [...prev, ...page.items]);
+      setPostsCursor(page.nextCursor);
+      setPostsHasMore(!!page.nextCursor);
+    } catch {
+      // silent — matches the initial-load error handling above
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  }
 
   const avatar = normalizeAssetUrl(user?.profilePictures?.[0]);
 
@@ -122,7 +144,7 @@ export default function PublicProfile() {
           ) : (
             <div className="grid grid-cols-3 gap-0.5">
               {posts.map((p, i) => {
-                const media = normalizeAssetUrl(p.mediaUrl);
+                const media = normalizeAssetUrl(p.videoUrl);
                 return (
                   <motion.button
                     key={p.id}
@@ -132,18 +154,25 @@ export default function PublicProfile() {
                     onClick={() => navigate(`/post/${p.id}`)}
                     className="relative aspect-square bg-white/5 overflow-hidden"
                   >
-                    {p.mediaType === 'VIDEO' ? (
-                      <video
-                        src={media ? `${media}#t=0.001` : ''}
-                        className="w-full h-full object-cover"
-                        muted playsInline preload="metadata"
-                      />
-                    ) : (
-                      <img src={media ?? ''} alt="" className="w-full h-full object-cover" />
-                    )}
+                    <video
+                      src={media ? `${media}#t=0.001` : ''}
+                      className="w-full h-full object-cover"
+                      muted playsInline preload="metadata"
+                    />
                   </motion.button>
                 );
               })}
+            </div>
+          )}
+          {postsHasMore && (
+            <div className="flex justify-center py-4">
+              <button
+                onClick={loadMorePosts}
+                disabled={loadingMorePosts}
+                className="px-5 py-2 rounded-full bg-white/8 border border-white/10 text-white/60 text-sm font-medium hover:text-white disabled:opacity-50 transition-colors"
+              >
+                {loadingMorePosts ? 'Loading…' : 'Load more'}
+              </button>
             </div>
           )}
         </>

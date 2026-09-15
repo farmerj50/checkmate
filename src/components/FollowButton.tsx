@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { UserPlus, UserCheck } from 'lucide-react';
-import { api } from '../lib/api';
+import { socialService } from '../services/social';
 
 interface Props {
   userId: string;
@@ -18,11 +18,9 @@ export default function FollowButton({ userId, initialIsFollowing, onToggle, sma
     const next = !following;
     setFollowing(next);
     try {
-      if (next) {
-        await api.post(`/social/follow/${userId}`, {});
-      } else {
-        await api.delete(`/social/follow/${userId}`);
-      }
+      // Real POST/DELETE /social/follow/:userId via ApiSocialService.
+      if (next) await socialService.follow(userId);
+      else await socialService.unfollow(userId);
       onToggle?.(next);
     } catch {
       setFollowing(!next);
