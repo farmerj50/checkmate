@@ -226,3 +226,72 @@ describe('Social E2E', () => {
     expect(createdBy).toBe(me!.id);
   });
 });
+
+describe('Profile feed (GET /posts/user/:userId) — root-only + limit+1 cursor semantics', () => {
+  beforeEach(async () => {
+    await resetDb();
+    await createUser(A, 'Alice');
+    await createUser(C, 'Charlie');
+  });
+
+  afterAll(async () => {
+    await resetDb();
+    await prisma.$disconnect();
+  });
+
+  it('replies never appear in the profile feed', async () => {
+    const charlie = await prisma.user.findUnique({ where: { firebaseUid: C } });
+    const parent = await request(app).post('/api/social/posts').set(authHeader(C)).send({ videoUrl: 'http://example.test/parent.mp4' });
+    expect(parent.status).toBe(201);
+    const parentId = parent.body.post.id;
+
+    const reply = await request(app).post('/api/social/posts').set(authHeader(C)).send({ videoUrl: 'http://example.test/reply.mp4', parentPostId: parentId });
+    expect(reply.status).toBe(201);
+
+    const profile = await request(app).get(`/api/social/posts/user/${charlie!.id}`).set(authHeader(A));
+    expect(profile.status).toBe(200);
+    const ids = profile.body.posts.map((p: any) => p.id);
+    expect(ids).toContain(parentId);
+    expect(ids).not.toContain(reply.body.post.id);
+  });
+
+  it('3 posts with limit 20 => nextCursor null', async () => {
+    const charlie = await prisma.user.findUnique({ where: { firebaseUid: C } });
+    for (let i = 0; i < 3; i++) {
+      await request(app).post('/api/social/posts').set(authHeader(C)).send({ videoUrl: `http://example.test/c${i}.mp4` });
+    }
+    const res = await request(app).get(`/api/social/posts/user/${charlie!.id}?limit=20`).set(authHeader(A));
+    expect(res.status).toBe(200);
+    expect(res.body.posts.length).toBe(3);
+    expect(res.body.nextCursor).toBeNull();
+  });
+
+  it('exactly 20 posts and no 21st => nextCursor null', async () => {
+    const charlie = await prisma.user.findUnique({ where: { firebaseUid: C } });
+    for (let i = 0; i < 20; i++) {
+      await request(app).post('/api/social/posts').set(authHeader(C)).send({ videoUrl: `http://example.test/c${i}.mp4` });
+    }
+    const res = await request(app).get(`/api/social/posts/user/${charlie!.id}?limit=20`).set(authHeader(A));
+    expect(res.status).toBe(200);
+    expect(res.body.posts.length).toBe(20);
+    expect(res.body.nextCursor).toBeNull();
+  });
+
+  it('21 posts => first page returns 20 with a cursor, second page returns the final post with null cursor', async () => {
+    const charlie = await prisma.user.findUnique({ where: { firebaseUid: C } });
+    for (let i = 0; i < 21; i++) {
+      await request(app).post('/api/social/posts').set(authHeader(C)).send({ videoUrl: `http://example.test/c${i}.mp4` });
+    }
+    const page1 = await request(app).get(`/api/social/posts/user/${charlie!.id}?limit=20`).set(authHeader(A));
+    expect(page1.status).toBe(200);
+    expect(page1.body.posts.length).toBe(20);
+    expect(page1.body.nextCursor).not.toBeNull();
+
+    const page2 = await request(app)
+      .get(`/api/social/posts/user/${charlie!.id}?limit=20&cursor=${page1.body.nextCursor}`)
+      .set(authHeader(A));
+    expect(page2.status).toBe(200);
+    expect(page2.body.posts.length).toBe(1);
+    expect(page2.body.nextCursor).toBeNull();
+  });
+});
