@@ -1,10 +1,24 @@
 // Shared TypeScript interfaces for Codex OpenAPI v0.1
 export interface User {
   id: string;
-  username: string;
+  firebaseUid: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  username?: string;
   displayName?: string;
-  isAdult: boolean;
-  createdAt: string; // ISO
+  dateOfBirth?: string;
+  gender?: string;
+  location?: string;
+  bio?: string | null;
+  profilePictures?: string[];
+  profileVideos?: string[];
+  profileVideo?: string | null;
+  interests?: string[];
+  isVerified?: boolean;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Post {
@@ -22,7 +36,6 @@ export interface Post {
 }
 
 export interface CreatePostRequest {
-  authorId: string;
   videoUrl: string;
   caption?: string | null;
   thumbnailUrl?: string | null;
@@ -35,17 +48,7 @@ export interface Reaction {
   createdAt: string;
 }
 
-export interface UploadSignedRequest {
-  filename?: string;
-  contentType?: string;
-  sizeBytes?: number;
-}
-
-export interface UploadSignedResponse {
-  uploadUrl: string;
-  token: string;
-  expiresIn: number;
-}
+// Note: v0.1 uses the existing multer upload endpoints; signed-upload types omitted
 
 export interface ErrorResponse {
   code: string;

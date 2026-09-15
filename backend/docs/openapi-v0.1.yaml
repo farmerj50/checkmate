@@ -11,6 +11,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Use Firebase ID token in `Authorization: Bearer <id-token>` header (preserve existing Firebase auth flow)
   schemas:
     User:
       type: object
@@ -18,13 +19,52 @@ components:
         id:
           type: string
           format: uuid
+        firebaseUid:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
         username:
           type: string
         displayName:
           type: string
-        isAdult:
+        dateOfBirth:
+          type: string
+          format: date
+        gender:
+          type: string
+        location:
+          type: string
+        bio:
+          type: string
+          nullable: true
+        profilePictures:
+          type: array
+          items:
+            type: string
+        profileVideos:
+          type: array
+          items:
+            type: string
+        profileVideo:
+          type: string
+          nullable: true
+        interests:
+          type: array
+          items:
+            type: string
+        isVerified:
+          type: boolean
+        isActive:
           type: boolean
         createdAt:
+          type: string
+          format: date-time
+        updatedAt:
           type: string
           format: date-time
     Post:
@@ -88,24 +128,7 @@ components:
         createdAt:
           type: string
           format: date-time
-    UploadSignedRequest:
-      type: object
-      properties:
-        filename:
-          type: string
-        contentType:
-          type: string
-        sizeBytes:
-          type: integer
-    UploadSignedResponse:
-      type: object
-      properties:
-        uploadUrl:
-          type: string
-        token:
-          type: string
-        expiresIn:
-          type: integer
+    # Note: v0.1 uses existing multer-based upload endpoints in the CheckMate backend
     Error:
       type: object
       properties:
@@ -165,42 +188,31 @@ paths:
                     type: string
                   refreshToken:
                     type: string
-  /uploads/signed:
+  /post-media:
     post:
-      summary: Request signed upload URL
+      summary: Upload media for posts (multipart/form-data) — uses existing multer upload
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UploadSignedRequest'
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadSignedResponse'
-  /ingest/notify:
-    post:
-      summary: Notify ingestion complete (internal)
-      requestBody:
-        required: true
-        content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
               properties:
-                uploadToken:
+                media:
                   type: string
-                videoUrl:
-                  type: string
-                thumbnailUrl:
-                  type: string
+                  format: binary
       responses:
         '200':
-          description: OK
+          description: Returns the uploaded media URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
   /posts:
     post:
       summary: Create a Post (after upload)
