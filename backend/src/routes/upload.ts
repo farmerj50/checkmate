@@ -226,7 +226,7 @@ router.put('/photos/reorder', authenticateToken, async (req: AuthenticatedReques
   }
 });
 
-// ── POST /api/upload/post-media — video OR image for social posts ─────────────
+// ── POST /api/upload/post-media — video media for social posts ────────────────
 const postMediaUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, VIDEOS_DIR),
@@ -235,17 +235,13 @@ const postMediaUpload = multer({
       let ext = 'mp4';
       if (file.mimetype === 'video/webm') ext = 'webm';
       else if (file.mimetype === 'video/quicktime') ext = 'mov';
-      else if (file.mimetype.includes('jpeg') || file.mimetype.includes('jpg')) ext = 'jpg';
-      else if (file.mimetype.includes('png')) ext = 'png';
-      else if (file.mimetype.includes('webp')) ext = 'webp';
-      else if (file.mimetype.includes('gif')) ext = 'gif';
       cb(null, `post_${uid}_${Date.now()}.${ext}`);
     },
   }),
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('video/') && !file.mimetype.startsWith('image/')) {
-      cb(new Error('Only video or image files are allowed'));
+    if (!file.mimetype.startsWith('video/')) {
+      cb(new Error('Only video files are allowed'));
       return;
     }
     cb(null, true);

@@ -1,6 +1,6 @@
 /**
  * SOCIAL API LAYER
- * Handles all social media functionality — posts, likes, comments, follows, notifications.
+ * Handles all social media functionality — video posts, reactions, replies, follows, notifications.
  * Completely separate from the dating/matching system.
  * DO NOT modify Match or Like (dating). PostLike is separate from dating Like.
  */
@@ -16,16 +16,27 @@ const AUTHOR_SELECT = {
   id: true, firstName: true, profilePictures: true, isVerified: true, profileVideo: true,
 };
 
+const REACTION_SELECT = {
+  emoji: true,
+  userId: true,
+};
+
 function emitNotification(userId: string, payload: object) {
   try { io?.to(`user:${userId}`).emit('notification:new', payload); } catch { /* silent */ }
 }
 
+function hasPrismaCode(err: unknown, code: string) {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === code;
+}
+
 // ── POST /posts ───────────────────────────────────────────────────────────────
+// Create a video post (or a video reply if parentPostId is provided)
 router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) => {
   const schema = z.object({
-    mediaUrl: z.string().url(),
-    mediaType: z.enum(['VIDEO', 'IMAGE']).default('VIDEO'),
+    videoUrl: z.string().url(),
+    thumbnailUrl: z.string().url().optional(),
     caption: z.string().max(500).optional(),
+    parentPostId: z.string().optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
@@ -34,15 +45,126 @@ router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) 
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
+    // If parentPostId provided, validate parent
+    if (parsed.data.parentPostId) {
+      const parent = await prisma.post.findUnique({ where: { id: parsed.data.parentPostId } });
+      if (!parent || parent.isDeleted) return res.status(400).json({ error: 'Invalid parentPostId' });
+      // Prevent replying to a post from a blocked user or to a post that has blocked the replier
+      const blocked = await prisma.block.findFirst({ where: { OR: [ { blockerId: parent.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: parent.authorId } ] } });
+      if (blocked) return res.status(403).json({ error: 'Cannot reply due to block relationship' });
+    }
+
     const post = await prisma.post.create({
-      data: { authorId: me.id, ...parsed.data },
+      data: {
+        authorId: me.id,
+        videoUrl: parsed.data.videoUrl,
+        thumbnailUrl: parsed.data.thumbnailUrl,
+        caption: parsed.data.caption,
+        parentPostId: parsed.data.parentPostId ?? null,
+      },
       include: {
         author: { select: AUTHOR_SELECT },
-        _count: { select: { likes: true, comments: true } },
-        likes: { where: { userId: me.id }, select: { id: true } },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
       },
     });
+
+    // If this is a reply, increment parent's replyCount
+    if (parsed.data.parentPostId) {
+      await prisma.post.update({ where: { id: parsed.data.parentPostId }, data: { replyCount: { increment: 1 } } }).catch(() => null);
+    }
     res.status(201).json({ post: formatPost(post, me.id) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE reaction (clear) - idempotent
+router.delete('/posts/:postId/reactions', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const schema = z.object({ emoji: z.string().min(1) });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
+
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const targetPost = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!targetPost || targetPost.isDeleted) return res.status(404).json({ error: 'Post not found' });
+
+    // delete if exists; idempotent
+    await prisma.postReaction.deleteMany({ where: { postId: req.params.postId, userId: me.id, emoji: parsed.data.emoji } });
+    const count = await prisma.postReaction.count({ where: { postId: req.params.postId } });
+    res.json({ reacted: false, count });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── GET /posts/:postId ────────────────────────────────────────────────────
+router.get('/posts/:postId', authenticateToken, async (req: AuthenticatedRequest, res, next) => {
+  if (req.params.postId === 'feed') return next();
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const post = await prisma.post.findUnique({
+      where: { id: req.params.postId },
+      include: {
+        author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
+      },
+    });
+    if (!post || post.isDeleted) return res.status(404).json({ error: 'Post not found' });
+
+    // Enforce blocking rules
+    const blocked = await prisma.block.findFirst({ where: { OR: [ { blockerId: post.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: post.authorId } ] } });
+    if (blocked) return res.status(403).json({ error: 'Access to this post is blocked' });
+
+    res.json({ post: formatPost(post as RawPost, me.id) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── GET /posts/:postId/replies ────────────────────────────────────────────
+router.get('/posts/:postId/replies', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const parent = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!parent || parent.isDeleted) return res.status(404).json({ error: 'Parent post not found' });
+
+    // Pagination
+    const cursor = req.query.cursor as string | undefined;
+    const limit = Math.min(50, Number(req.query.limit ?? 20));
+
+    const whereClause: any = { parentPostId: req.params.postId, isDeleted: false };
+    if (cursor) whereClause.createdAt = { lt: (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt };
+
+    // Exclude blocked authors
+    whereClause.NOT = {
+      OR: [
+        { author: { blocks: { some: { blockedId: me.id } } } },
+        { author: { blockedBy: { some: { blockerId: me.id } } } },
+      ],
+    };
+
+    const replies = await prisma.post.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        author: { select: AUTHOR_SELECT },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
+      },
+    });
+    res.json({ replies: replies.map((r) => formatPost(r as RawPost, me.id)), nextCursor: replies[replies.length - 1]?.id ?? null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -62,17 +184,26 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
     const followingIds = follows.map((f) => f.followingId);
 
     // Posts from followed users + own posts
+    // Exclude posts where there's a blocking relationship between me and the author
+    const cursorCreatedAt = cursor ? (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt : undefined;
     const followedPosts = await prisma.post.findMany({
       where: {
         authorId: { in: [...followingIds, me.id] },
-        ...(cursor ? { createdAt: { lt: (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt } } : {}),
+        isDeleted: false,
+        ...(cursorCreatedAt ? { createdAt: { lt: cursorCreatedAt } } : {}),
+        NOT: {
+          OR: [
+            { author: { blocks: { some: { blockedId: me.id } } } },
+            { author: { blockedBy: { some: { blockerId: me.id } } } },
+          ],
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
         author: { select: AUTHOR_SELECT },
-        _count: { select: { likes: true, comments: true } },
-        likes: { where: { userId: me.id }, select: { id: true } },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
       },
     });
 
@@ -83,13 +214,20 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
           where: {
             authorId: { notIn: [...followingIds, me.id] },
             createdAt: { gte: sevenDaysAgo },
+            isDeleted: false,
+            NOT: {
+              OR: [
+                { author: { blocks: { some: { blockedId: me.id } } } },
+                { author: { blockedBy: { some: { blockerId: me.id } } } },
+              ],
+            },
           },
-          orderBy: { likes: { _count: 'desc' } },
+          orderBy: { createdAt: 'desc' },
           take: limit - followedPosts.length,
           include: {
             author: { select: AUTHOR_SELECT },
-            _count: { select: { likes: true, comments: true } },
-            likes: { where: { userId: me.id }, select: { id: true } },
+            reactions: { select: REACTION_SELECT },
+            _count: { select: { reactions: true, replies: true } },
           },
         })
       : [];
@@ -107,16 +245,31 @@ router.get('/posts/user/:userId', authenticateToken, async (req: AuthenticatedRe
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
+    const cursor = req.query.cursor as string | undefined;
+    const limit = Math.min(50, Number(req.query.limit ?? 20));
+    const cursorCreatedAt = cursor ? (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt : undefined;
+
     const posts = await prisma.post.findMany({
-      where: { authorId: req.params.userId },
+      where: {
+        authorId: req.params.userId,
+        isDeleted: false,
+        ...(cursorCreatedAt ? { createdAt: { lt: cursorCreatedAt } } : {}),
+        NOT: {
+          OR: [
+            { author: { blocks: { some: { blockedId: me.id } } } },
+            { author: { blockedBy: { some: { blockerId: me.id } } } },
+          ],
+        },
+      },
       orderBy: { createdAt: 'desc' },
+      take: limit,
       include: {
         author: { select: AUTHOR_SELECT },
-        _count: { select: { likes: true, comments: true } },
-        likes: { where: { userId: me.id }, select: { id: true } },
+        reactions: { select: REACTION_SELECT },
+        _count: { select: { reactions: true, replies: true } },
       },
     });
-    res.json({ posts: posts.map((p) => formatPost(p, me.id)) });
+    res.json({ posts: posts.map((p) => formatPost(p as RawPost, me.id)), nextCursor: posts[posts.length - 1]?.id ?? null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -130,68 +283,17 @@ router.delete('/posts/:postId', authenticateToken, async (req: AuthenticatedRequ
 
     const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
     if (!post || post.authorId !== me.id) return res.status(403).json({ error: 'Forbidden' });
-
-    await prisma.post.delete({ where: { id: req.params.postId } });
+    // Soft-delete
+    await prisma.post.update({ where: { id: req.params.postId }, data: { isDeleted: true, deletedAt: new Date() } });
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── POST /posts/:postId/like (toggle) ─────────────────────────────────────────
-router.post('/posts/:postId/like', authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
-    if (!me) return res.status(404).json({ error: 'User not found' });
-
-    const existing = await prisma.postLike.findUnique({
-      where: { postId_userId: { postId: req.params.postId, userId: me.id } },
-    });
-
-    if (existing) {
-      await prisma.postLike.delete({ where: { id: existing.id } });
-      const count = await prisma.postLike.count({ where: { postId: req.params.postId } });
-      return res.json({ liked: false, count });
-    }
-
-    await prisma.postLike.create({ data: { postId: req.params.postId, userId: me.id } });
-    const count = await prisma.postLike.count({ where: { postId: req.params.postId } });
-
-    // Notify post author
-    const post = await prisma.post.findUnique({ where: { id: req.params.postId }, select: { authorId: true } });
-    if (post && post.authorId !== me.id) {
-      const notif = await prisma.notification.create({
-        data: { userId: post.authorId, type: 'POST_LIKED', actorId: me.id, postId: req.params.postId },
-      });
-      const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
-      emitNotification(post.authorId, { ...notif, actor });
-    }
-
-    res.json({ liked: true, count });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /posts/:postId/likes ──────────────────────────────────────────────────
-router.get('/posts/:postId/likes', authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
-    if (!me) return res.status(404).json({ error: 'User not found' });
-
-    const [count, mine] = await Promise.all([
-      prisma.postLike.count({ where: { postId: req.params.postId } }),
-      prisma.postLike.findUnique({ where: { postId_userId: { postId: req.params.postId, userId: me.id } } }),
-    ]);
-    res.json({ count, isLikedByMe: !!mine });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── POST /posts/:postId/comments ──────────────────────────────────────────────
-router.post('/posts/:postId/comments', authenticateToken, async (req: AuthenticatedRequest, res) => {
-  const schema = z.object({ content: z.string().min(1).max(500) });
+// ── POST /posts/:postId/reactions ─────────────────────────────────────────────
+router.post('/posts/:postId/reactions', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const schema = z.object({ emoji: z.string().min(1) });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
 
@@ -199,56 +301,45 @@ router.post('/posts/:postId/comments', authenticateToken, async (req: Authentica
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
-    const comment = await prisma.comment.create({
-      data: { postId: req.params.postId, authorId: me.id, content: parsed.data.content },
-      include: { author: { select: AUTHOR_SELECT } },
-    });
+    // Validate post
+    const targetPost = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!targetPost || targetPost.isDeleted) return res.status(404).json({ error: 'Post not found' });
+    const blockedRel = await prisma.block.findFirst({ where: { OR: [ { blockerId: targetPost.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: targetPost.authorId } ] } });
+    if (blockedRel) return res.status(403).json({ error: 'Cannot react to this post' });
+
+    try {
+      await prisma.postReaction.upsert({
+        where: {
+          postId_userId_emoji: {
+            postId: req.params.postId,
+            userId: me.id,
+            emoji: parsed.data.emoji,
+          },
+        },
+        update: {},
+        create: {
+          postId: req.params.postId,
+          userId: me.id,
+          emoji: parsed.data.emoji,
+        },
+      });
+    } catch (err) {
+      if (hasPrismaCode(err, 'P2003')) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+      throw err;
+    }
+    const count = await prisma.postReaction.count({ where: { postId: req.params.postId } });
 
     // Notify post author
     const post = await prisma.post.findUnique({ where: { id: req.params.postId }, select: { authorId: true } });
     if (post && post.authorId !== me.id) {
-      const notif = await prisma.notification.create({
-        data: { userId: post.authorId, type: 'POST_COMMENTED', actorId: me.id, postId: req.params.postId, commentId: comment.id },
-      });
-      emitNotification(post.authorId, { ...notif, actor: comment.author, preview: parsed.data.content.slice(0, 60) });
+      const notif = await prisma.notification.create({ data: { userId: post.authorId, type: 'POST_LIKED', actorId: me.id, postId: req.params.postId } });
+      const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
+      emitNotification(post.authorId, { ...notif, actor });
     }
 
-    res.status(201).json({ comment });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── GET /posts/:postId/comments ───────────────────────────────────────────────
-router.get('/posts/:postId/comments', authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const cursor = req.query.cursor as string | undefined;
-    const comments = await prisma.comment.findMany({
-      where: {
-        postId: req.params.postId,
-        ...(cursor ? { createdAt: { lt: (await prisma.comment.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 30,
-      include: { author: { select: AUTHOR_SELECT } },
-    });
-    res.json({ comments, nextCursor: comments[comments.length - 1]?.id ?? null });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── DELETE /posts/:postId/comments/:id ────────────────────────────────────────
-router.delete('/posts/:postId/comments/:id', authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
-    if (!me) return res.status(404).json({ error: 'User not found' });
-
-    const comment = await prisma.comment.findUnique({ where: { id: req.params.id } });
-    if (!comment || comment.authorId !== me.id) return res.status(403).json({ error: 'Forbidden' });
-
-    await prisma.comment.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
+    res.json({ reacted: true, count });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -261,17 +352,25 @@ router.post('/follow/:userId', authenticateToken, async (req: AuthenticatedReque
     if (!me) return res.status(404).json({ error: 'User not found' });
     if (me.id === req.params.userId) return res.status(400).json({ error: 'Cannot follow yourself' });
 
+    const [target, blocked] = await Promise.all([
+      prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } }),
+      prisma.block.findFirst({ where: { OR: [ { blockerId: me.id, blockedId: req.params.userId }, { blockerId: req.params.userId, blockedId: me.id } ] } }),
+    ]);
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    if (blocked) return res.status(403).json({ error: 'Cannot follow due to block relationship' });
+
+    const existing = await prisma.follow.findUnique({ where: { followerId_followingId: { followerId: me.id, followingId: req.params.userId } } }).catch(() => null);
     await prisma.follow.upsert({
       where: { followerId_followingId: { followerId: me.id, followingId: req.params.userId } },
       update: {},
       create: { followerId: me.id, followingId: req.params.userId },
     });
 
-    const notif = await prisma.notification.create({
-      data: { userId: req.params.userId, type: 'NEW_FOLLOWER', actorId: me.id },
-    });
-    const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
-    emitNotification(req.params.userId, { ...notif, actor });
+    if (!existing) {
+      const notif = await prisma.notification.create({ data: { userId: req.params.userId, type: 'NEW_FOLLOWER', actorId: me.id } });
+      const actor = await prisma.user.findUnique({ where: { id: me.id }, select: AUTHOR_SELECT });
+      emitNotification(req.params.userId, { ...notif, actor });
+    }
 
     res.json({ following: true });
   } catch (err: any) {
@@ -289,6 +388,66 @@ router.delete('/follow/:userId', authenticateToken, async (req: AuthenticatedReq
       where: { followerId: me.id, followingId: req.params.userId },
     });
     res.json({ following: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── POST /block/:userId ─────────────────────────────────────────────────────
+router.post('/block/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    if (me.id === req.params.userId) return res.status(400).json({ error: 'Cannot block yourself' });
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.block.upsert({
+      where: { blockerId_blockedId: { blockerId: me.id, blockedId: req.params.userId } },
+      update: {},
+      create: { blockerId: me.id, blockedId: req.params.userId },
+    });
+
+    // Optionally remove follow relations both ways
+    await prisma.follow.deleteMany({ where: { OR: [ { followerId: me.id, followingId: req.params.userId }, { followerId: req.params.userId, followingId: me.id } ] } });
+
+    res.json({ blocked: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── DELETE /block/:userId ───────────────────────────────────────────────────
+router.delete('/block/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.block.deleteMany({ where: { blockerId: me.id, blockedId: req.params.userId } });
+    res.json({ blocked: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── POST /reports ───────────────────────────────────────────────────────────
+router.post('/reports', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const schema = z.object({ reportedId: z.string(), reason: z.enum(['INAPPROPRIATE_CONTENT','HARASSMENT','FAKE_PROFILE','SPAM','UNDERAGE','OTHER']), description: z.string().max(1000).optional() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
+
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    if (me.id === parsed.data.reportedId) return res.status(400).json({ error: 'Cannot report yourself' });
+    const target = await prisma.user.findUnique({ where: { id: parsed.data.reportedId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: 'User not found' });
+
+    const report = await prisma.report.create({ data: { reporterId: me.id, reportedId: parsed.data.reportedId, reason: parsed.data.reason as any, description: parsed.data.description } });
+    res.status(201).json({ report });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -408,20 +567,32 @@ router.get('/notifications/unread-count', authenticateToken, async (req: Authent
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 type RawPost = {
-  id: string; authorId: string; mediaUrl: string; mediaType: string;
-  caption: string | null; createdAt: Date; updatedAt: Date;
+  id: string; authorId: string; videoUrl: string;
+  caption: string | null; thumbnailUrl?: string | null; createdAt: Date; updatedAt: Date;
+  parentPostId?: string | null;
   author: { id: string; firstName: string; profilePictures: string[]; isVerified: boolean; profileVideo?: string | null };
-  _count: { likes: number; comments: number };
-  likes: { id: string }[];
+  reactions: { emoji: string; userId: string }[];
+  _count: { reactions: number; replies: number };
 };
 
 function formatPost(p: RawPost, myId: string) {
+  const reactions = p.reactions.reduce<Record<string, number>>((counts, reaction) => {
+    counts[reaction.emoji] = (counts[reaction.emoji] ?? 0) + 1;
+    return counts;
+  }, {});
+  const viewerReactions = p.reactions
+    .filter((reaction) => reaction.userId === myId)
+    .map((reaction) => reaction.emoji);
+
   return {
     id: p.id, authorId: p.authorId, author: p.author,
-    mediaUrl: p.mediaUrl, mediaType: p.mediaType,
+    videoUrl: p.videoUrl, thumbnailUrl: p.thumbnailUrl ?? undefined,
     caption: p.caption ?? undefined,
-    likeCount: p._count.likes, commentCount: p._count.comments,
-    isLikedByMe: p.likes.length > 0,
+    reactionCount: p._count.reactions,
+    reactions,
+    viewerReactions,
+    replyCount: p._count.replies,
+    parentPostId: p.parentPostId ?? null,
     createdAt: p.createdAt.toISOString(),
   };
 }

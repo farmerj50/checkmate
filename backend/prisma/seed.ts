@@ -566,40 +566,40 @@ async function main() {
 
   // 5. Seed fake social posts from test users
   const POST_DATA = [
-    { uid: 'test_user_1',  mediaUrl: V[0], caption: 'Golden hour from the rooftop 🌅' },
-    { uid: 'test_user_2',  mediaUrl: V[1], caption: 'New recipe dropping this weekend 🍳' },
-    { uid: 'test_user_3',  mediaUrl: V[2], caption: 'Morning run ✔️ Coffee now ☕' },
-    { uid: 'test_user_4',  mediaUrl: V[3], caption: 'Studio session. Beats loading... 🎧' },
-    { uid: 'test_user_5',  mediaUrl: V[4], caption: 'Yoga flow to start the week right 🧘' },
-    { uid: 'test_user_6',  mediaUrl: V[5], caption: 'Road trip vibes only 🚗' },
-    { uid: 'test_user_7',  mediaUrl: V[6], caption: 'Working on something big. Stay tuned.' },
-    { uid: 'test_user_8',  mediaUrl: V[7], caption: 'Throwback to the best hike ever 🏔️' },
-    { uid: 'test_user_1',  mediaUrl: V[8], caption: 'City lights never get old ✨' },
-    { uid: 'test_user_3',  mediaUrl: V[2], caption: 'Sunday reset 🌿' },
-    { uid: 'demo_user',    mediaUrl: V[0], caption: 'First post on this app — let\'s go 🔥' },
+    { uid: 'test_user_1',  videoUrl: V[0], caption: 'Golden hour from the rooftop 🌅' },
+    { uid: 'test_user_2',  videoUrl: V[1], caption: 'New recipe dropping this weekend 🍳' },
+    { uid: 'test_user_3',  videoUrl: V[2], caption: 'Morning run ✔️ Coffee now ☕' },
+    { uid: 'test_user_4',  videoUrl: V[3], caption: 'Studio session. Beats loading... 🎧' },
+    { uid: 'test_user_5',  videoUrl: V[4], caption: 'Yoga flow to start the week right 🧘' },
+    { uid: 'test_user_6',  videoUrl: V[5], caption: 'Road trip vibes only 🚗' },
+    { uid: 'test_user_7',  videoUrl: V[6], caption: 'Working on something big. Stay tuned.' },
+    { uid: 'test_user_8',  videoUrl: V[7], caption: 'Throwback to the best hike ever 🏔️' },
+    { uid: 'test_user_1',  videoUrl: V[8], caption: 'City lights never get old ✨' },
+    { uid: 'test_user_3',  videoUrl: V[2], caption: 'Sunday reset 🌿' },
+    { uid: 'demo_user',    videoUrl: V[0], caption: 'First post on this app — let\'s go 🔥' },
   ];
 
   let postCount = 0;
-  for (const { uid, mediaUrl, caption } of POST_DATA) {
+  for (const { uid, videoUrl, caption } of POST_DATA) {
     const author = uid === 'demo_user' ? demo : await prisma.user.findUnique({ where: { firebaseUid: uid } });
     if (!author) continue;
     await prisma.post.upsert({
       where: { id: `seed-post-${uid}-${postCount}` },
       update: { caption },
-      create: { id: `seed-post-${uid}-${postCount}`, authorId: author.id, mediaUrl, mediaType: 'VIDEO', caption },
+      create: { id: `seed-post-${uid}-${postCount}`, authorId: author.id, videoUrl, caption },
     });
     postCount++;
   }
   console.log(`\n  ✓ ${postCount} fake posts seeded for social feed testing`);
 
-  // Add some post likes so feed isn't empty
+  // Add some reactions so feed isn't empty
   const allPosts = await prisma.post.findMany({ select: { id: true, authorId: true } });
   for (const post of allPosts.slice(0, 6)) {
     if (post.authorId !== demo.id) {
-      await prisma.postLike.upsert({
-        where: { postId_userId: { postId: post.id, userId: demo.id } },
+      await prisma.postReaction.upsert({
+        where: { postId_userId_emoji: { postId: post.id, userId: demo.id, emoji: '🔥' } },
         update: {},
-        create: { postId: post.id, userId: demo.id },
+        create: { postId: post.id, userId: demo.id, emoji: '🔥' },
       }).catch(() => {});
     }
   }

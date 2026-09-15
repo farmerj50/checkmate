@@ -97,11 +97,13 @@ const io = new SocketServer(httpServer, {
 initSocket(io);
 setIo(io);
 
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`⚡ Socket.io ready`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`⚡ Socket.io ready`);
+    console.log(`📱 Environment: ${process.env.NODE_ENV}`);
+  });
+}
 
 process.on('SIGTERM', async () => {
   await prisma.$disconnect();
