@@ -62,8 +62,7 @@ model User {
   following        Follow[]        @relation("FollowFollower")
   followers        Follow[]        @relation("FollowFollowing")
   posts            Post[]          @relation("PostAuthor")
-  postLikes        PostLike[]      @relation("PostLikeUser")
-  comments         Comment[]       @relation("CommentAuthor")
+  postReactions    PostReaction[]  @relation("PostReactionUser")
   notifications    Notification[]  @relation("NotificationUser")
   userPrompt       UserPrompt?
   profileViewsMade     ProfileView[] @relation("ProfileViewViewer")
@@ -243,17 +242,21 @@ model Follow {
 
 // ── Social: Posts ─────────────────────────────────────────────────────────────
 model Post {
-  id        String        @id @default(cuid())
-  authorId  String
-  mediaUrl  String
-  mediaType PostMediaType @default(VIDEO)
-  caption   String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id               String           @id @default(cuid())
+  authorId         String
+  videoUrl         String
+  caption          String?
+  thumbnailUrl     String?
+  visibility       Visibility       @default(PUBLIC)
+  parentPostId     String?
+  replyCount       Int              @default(0)
+  moderationStatus ModerationStatus @default(PENDING)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  author   User      @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  likes    PostLike[]
-  comments Comment[]
+  author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  reactions PostReaction[]
+  replies   Post[]         @relation("PostReplies", references: [id])
 
   @@index([authorId])
   @@index([createdAt])
@@ -266,33 +269,22 @@ enum PostMediaType {
 }
 
 // ── Social: Post Likes ────────────────────────────────────────────────────────
-model PostLike {
+model PostReaction {
   id        String   @id @default(cuid())
   postId    String
   userId    String
+  emoji     String
   createdAt DateTime @default(now())
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation("PostLikeUser", fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation("PostReactionUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([postId, userId])
-  @@map("post_likes")
+  @@unique([postId, userId, emoji])
+  @@map("post_reactions")
 }
 
 // ── Social: Comments ──────────────────────────────────────────────────────────
-model Comment {
-  id        String   @id @default(cuid())
-  postId    String
-  authorId  String
-  content   String   @db.VarChar(500)
-  createdAt DateTime @default(now())
-
-  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author User @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-
-  @@index([postId])
-  @@map("comments")
-}
+// Comments removed: video-first product uses Post-to-Post replies instead of text comments.
 
 // ── Social: Notifications ─────────────────────────────────────────────────────
 model Notification {
@@ -301,7 +293,6 @@ model Notification {
   type      NotificationType
   actorId   String?
   postId    String?
-  commentId String?
   matchId   String?
   isRead    Boolean          @default(false)
   createdAt DateTime         @default(now())
@@ -316,7 +307,6 @@ model Notification {
 enum NotificationType {
   NEW_FOLLOWER
   POST_LIKED
-  POST_COMMENTED
   NEW_MATCH
 }
 

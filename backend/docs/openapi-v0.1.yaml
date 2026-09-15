@@ -1,0 +1,321 @@
+openapi: 3.0.3
+info:
+  title: Vipi (Checkmate) Backend API
+  version: '0.1.0'
+  description: OpenAPI skeleton for Codex backend contracts (v0.1, planning only)
+servers:
+  - url: http://localhost:5001
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        displayName:
+          type: string
+        isAdult:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorId:
+          type: string
+        videoUrl:
+          type: string
+        caption:
+          type: string
+          nullable: true
+        thumbnailUrl:
+          type: string
+          nullable: true
+        visibility:
+          type: string
+          enum: [public, unlisted, private]
+        createdAt:
+          type: string
+          format: date-time
+        parentPostId:
+          type: string
+          nullable: true
+        replyCount:
+          type: integer
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reaction'
+        moderationStatus:
+          type: string
+          enum: [pending, approved, rejected, flagged]
+    CreatePostRequest:
+      type: object
+      required: [authorId, videoUrl]
+      properties:
+        authorId:
+          type: string
+        videoUrl:
+          type: string
+        caption:
+          type: string
+          nullable: true
+        thumbnailUrl:
+          type: string
+          nullable: true
+        parentPostId:
+          type: string
+          nullable: true
+    Reaction:
+      type: object
+      properties:
+        emoji:
+          type: string
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    UploadSignedRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+    UploadSignedResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+        token:
+          type: string
+        expiresIn:
+          type: integer
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+paths:
+  /auth/signup:
+    post:
+      summary: Sign up
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, dob]
+              properties:
+                username:
+                  type: string
+                dob:
+                  type: string
+                  format: date
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/schemas/Error'
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+  /uploads/signed:
+    post:
+      summary: Request signed upload URL
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadSignedRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSignedResponse'
+  /ingest/notify:
+    post:
+      summary: Notify ingestion complete (internal)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                uploadToken:
+                  type: string
+                videoUrl:
+                  type: string
+                thumbnailUrl:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /posts:
+    post:
+      summary: Create a Post (after upload)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePostRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+  /posts/{id}:
+    get:
+      summary: Get a post with limited reply summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+  /feed:
+    get:
+      summary: Get paginated feed (cursor)
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: paginated feed
+  /posts/{id}/reactions:
+    post:
+      summary: Add reaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                emoji:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /users/{id}/follow:
+    post:
+      summary: Follow/unfollow
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [follow, unfollow]
+      responses:
+        '200':
+          description: OK
+  /reports:
+    post:
+      summary: Submit a report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                postId:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '201':
+          description: Created
+  /moderation/queue:
+    get:
+      summary: Fetch moderation queue (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
