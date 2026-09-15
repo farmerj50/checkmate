@@ -36,6 +36,15 @@ router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) 
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
+    // If parentPostId provided, validate parent
+    if (parsed.data.parentPostId) {
+      const parent = await prisma.post.findUnique({ where: { id: parsed.data.parentPostId } });
+      if (!parent || parent.isDeleted) return res.status(400).json({ error: 'Invalid parentPostId' });
+      // Prevent replying to a post from a blocked user or to a post that has blocked the replier
+      const blocked = await prisma.block.findFirst({ where: { OR: [ { blockerId: parent.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: parent.authorId } ] } });
+      if (blocked) return res.status(403).json({ error: 'Cannot reply due to block relationship' });
+    }
+
     const post = await prisma.post.create({
       data: {
         authorId: me.id,
@@ -49,7 +58,64 @@ router.post('/posts', authenticateToken, async (req: AuthenticatedRequest, res) 
         _count: { select: { reactions: true, replies: true } },
       },
     });
+
+    // If this is a reply, increment parent's replyCount
+    if (parsed.data.parentPostId) {
+      await prisma.post.update({ where: { id: parsed.data.parentPostId }, data: { replyCount: { increment: 1 } } }).catch(() => null);
+    }
     res.status(201).json({ post: formatPost(post, me.id) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── GET /posts/:postId ────────────────────────────────────────────────────
+router.get('/posts/:postId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const post = await prisma.post.findUnique({ where: { id: req.params.postId }, include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } } });
+    if (!post || post.isDeleted) return res.status(404).json({ error: 'Post not found' });
+
+    // Enforce blocking rules
+    const blocked = await prisma.block.findFirst({ where: { OR: [ { blockerId: post.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: post.authorId } ] } });
+    if (blocked) return res.status(403).json({ error: 'Access to this post is blocked' });
+
+    res.json({ post: formatPost(post as RawPost, me.id) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── GET /posts/:postId/replies ────────────────────────────────────────────
+router.get('/posts/:postId/replies', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    const parent = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!parent || parent.isDeleted) return res.status(404).json({ error: 'Parent post not found' });
+
+    // Pagination
+    const cursor = req.query.cursor as string | undefined;
+    const limit = Math.min(50, Number(req.query.limit ?? 20));
+
+    const whereClause: any = { parentPostId: req.params.postId, isDeleted: false };
+    if (cursor) whereClause.createdAt = { lt: (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt };
+
+    // Exclude blocked authors
+    whereClause.NOT = {
+      OR: [
+        { author: { blocks: { some: { blockedId: me.id } } } },
+        { author: { blockedBy: { some: { blockerId: me.id } } } },
+      ],
+    };
+
+    const replies = await prisma.post.findMany({ where: whereClause, orderBy: { createdAt: 'desc' }, take: limit, include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } } });
+    res.json({ replies: replies.map((r) => formatPost(r as RawPost, me.id)), nextCursor: replies[replies.length - 1]?.id ?? null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -69,10 +135,19 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
     const followingIds = follows.map((f) => f.followingId);
 
     // Posts from followed users + own posts
+    // Exclude posts where there's a blocking relationship between me and the author
+    const cursorCreatedAt = cursor ? (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt : undefined;
     const followedPosts = await prisma.post.findMany({
       where: {
         authorId: { in: [...followingIds, me.id] },
-        ...(cursor ? { createdAt: { lt: (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt } } : {}),
+        isDeleted: false,
+        ...(cursorCreatedAt ? { createdAt: { lt: cursorCreatedAt } } : {}),
+        NOT: {
+          OR: [
+            { author: { blocks: { some: { blockedId: me.id } } } },
+            { author: { blockedBy: { some: { blockerId: me.id } } } },
+          ],
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -89,6 +164,13 @@ router.get('/posts/feed', authenticateToken, async (req: AuthenticatedRequest, r
           where: {
             authorId: { notIn: [...followingIds, me.id] },
             createdAt: { gte: sevenDaysAgo },
+            isDeleted: false,
+            NOT: {
+              OR: [
+                { author: { blocks: { some: { blockedId: me.id } } } },
+                { author: { blockedBy: { some: { blockerId: me.id } } } },
+              ],
+            },
           },
           orderBy: { likes: { _count: 'desc' } },
           take: limit - followedPosts.length,
@@ -112,12 +194,27 @@ router.get('/posts/user/:userId', authenticateToken, async (req: AuthenticatedRe
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
 
+    const cursor = req.query.cursor as string | undefined;
+    const limit = Math.min(50, Number(req.query.limit ?? 20));
+    const cursorCreatedAt = cursor ? (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt : undefined;
+
     const posts = await prisma.post.findMany({
-      where: { authorId: req.params.userId },
+      where: {
+        authorId: req.params.userId,
+        isDeleted: false,
+        ...(cursorCreatedAt ? { createdAt: { lt: cursorCreatedAt } } : {}),
+        NOT: {
+          OR: [
+            { author: { blocks: { some: { blockedId: me.id } } } },
+            { author: { blockedBy: { some: { blockerId: me.id } } } },
+          ],
+        },
+      },
       orderBy: { createdAt: 'desc' },
+      take: limit,
       include: { author: { select: AUTHOR_SELECT }, _count: { select: { reactions: true, replies: true } } },
     });
-    res.json({ posts: posts.map((p) => formatPost(p, me.id)) });
+    res.json({ posts: posts.map((p) => formatPost(p as RawPost, me.id)), nextCursor: posts[posts.length - 1]?.id ?? null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -131,7 +228,8 @@ router.delete('/posts/:postId', authenticateToken, async (req: AuthenticatedRequ
 
     const post = await prisma.post.findUnique({ where: { id: req.params.postId } });
     if (!post || post.authorId !== me.id) return res.status(403).json({ error: 'Forbidden' });
-    await prisma.post.delete({ where: { id: req.params.postId } });
+    // Soft-delete
+    await prisma.post.update({ where: { id: req.params.postId }, data: { isDeleted: true, deletedAt: new Date() } });
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -147,6 +245,12 @@ router.post('/posts/:postId/reactions', authenticateToken, async (req: Authentic
   try {
     const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
     if (!me) return res.status(404).json({ error: 'User not found' });
+
+    // Validate post
+    const targetPost = await prisma.post.findUnique({ where: { id: req.params.postId } });
+    if (!targetPost || targetPost.isDeleted) return res.status(404).json({ error: 'Post not found' });
+    const blockedRel = await prisma.block.findFirst({ where: { OR: [ { blockerId: targetPost.authorId, blockedId: me.id }, { blockerId: me.id, blockedId: targetPost.authorId } ] } });
+    if (blockedRel) return res.status(403).json({ error: 'Cannot react to this post' });
 
     // Upsert reaction (if exists delete -> toggle behavior not desired for emoji; allow multiple emojis)
     const exists = await prisma.postReaction.findUnique({ where: { postId_userId_emoji: { postId: req.params.postId, userId: me.id, emoji: parsed.data.emoji } } }).catch(() => null);
@@ -208,6 +312,62 @@ router.delete('/follow/:userId', authenticateToken, async (req: AuthenticatedReq
       where: { followerId: me.id, followingId: req.params.userId },
     });
     res.json({ following: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── POST /block/:userId ─────────────────────────────────────────────────────
+router.post('/block/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    if (me.id === req.params.userId) return res.status(400).json({ error: 'Cannot block yourself' });
+
+    await prisma.block.upsert({
+      where: { blockerId_blockedId: { blockerId: me.id, blockedId: req.params.userId } },
+      update: {},
+      create: { blockerId: me.id, blockedId: req.params.userId },
+    });
+
+    // Optionally remove follow relations both ways
+    await prisma.follow.deleteMany({ where: { OR: [ { followerId: me.id, followingId: req.params.userId }, { followerId: req.params.userId, followingId: me.id } ] } });
+
+    res.json({ blocked: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── DELETE /block/:userId ───────────────────────────────────────────────────
+router.delete('/block/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.block.deleteMany({ where: { blockerId: me.id, blockedId: req.params.userId } });
+    res.json({ blocked: false });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ── POST /reports ───────────────────────────────────────────────────────────
+router.post('/reports', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const schema = z.object({ reportedId: z.string(), reason: z.enum(['INAPPROPRIATE_CONTENT','HARASSMENT','FAKE_PROFILE','SPAM','UNDERAGE','OTHER']), description: z.string().max(1000).optional() });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
+
+  try {
+    const me = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid }, select: { id: true } });
+    if (!me) return res.status(404).json({ error: 'User not found' });
+    if (me.id === parsed.data.reportedId) return res.status(400).json({ error: 'Cannot report yourself' });
+
+    const report = await prisma.report.create({ data: { reporterId: me.id, reportedId: parsed.data.reportedId, reason: parsed.data.reason as any, description: parsed.data.description } });
+    res.status(201).json({ report });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
