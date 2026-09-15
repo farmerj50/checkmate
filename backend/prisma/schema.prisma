@@ -272,6 +272,18 @@ enum PostMediaType {
   IMAGE
 }
 
+enum Visibility {
+  PUBLIC
+  PRIVATE
+  UNLISTED
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ── Social: Post Likes ────────────────────────────────────────────────────────
 model PostReaction {
   id        String   @id @default(cuid())
