@@ -249,9 +249,12 @@ router.get('/posts/user/:userId', authenticateToken, async (req: AuthenticatedRe
     const limit = Math.min(50, Number(req.query.limit ?? 20));
     const cursorCreatedAt = cursor ? (await prisma.post.findUnique({ where: { id: cursor }, select: { createdAt: true } }))?.createdAt : undefined;
 
+    // Profile video feed is root posts only — replies surface in their
+    // parent's thread, not as their own tile here.
     const posts = await prisma.post.findMany({
       where: {
         authorId: req.params.userId,
+        parentPostId: null,
         isDeleted: false,
         ...(cursorCreatedAt ? { createdAt: { lt: cursorCreatedAt } } : {}),
         NOT: {
@@ -262,14 +265,21 @@ router.get('/posts/user/:userId', authenticateToken, async (req: AuthenticatedRe
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      // Fetch one extra row so nextCursor reflects whether another page
+      // actually exists, instead of always pointing at the last row fetched.
+      take: limit + 1,
       include: {
         author: { select: AUTHOR_SELECT },
         reactions: { select: REACTION_SELECT },
         _count: { select: { reactions: true, replies: true } },
       },
     });
-    res.json({ posts: posts.map((p) => formatPost(p as RawPost, me.id)), nextCursor: posts[posts.length - 1]?.id ?? null });
+    const hasMore = posts.length > limit;
+    const page = hasMore ? posts.slice(0, limit) : posts;
+    res.json({
+      posts: page.map((p) => formatPost(p as RawPost, me.id)),
+      nextCursor: hasMore ? page[page.length - 1].id : null,
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
