@@ -28,13 +28,16 @@ export default function PremiumGate({ open, onClose, reason = 'likes' }: Props) 
     <AnimatePresence>
       {open && (
         <>
-          {/* Backdrop */}
+          {/* Backdrop — z-[100]: same fix as ReportModal. This bottom sheet and
+              the persistent Navigation bar both sat at z-50, so the sheet's
+              own bottom buttons (Get Premium / Maybe later) could be captured
+              by the nav underneath instead of the sheet itself. */}
           <motion.div
             key="backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 z-50"
+            className="fixed inset-0 bg-black/60 z-[100]"
             onClick={onClose}
           />
 
@@ -45,7 +48,7 @@ export default function PremiumGate({ open, onClose, reason = 'likes' }: Props) 
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-            className="fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-3xl p-6 pb-10 shadow-2xl max-w-md mx-auto"
+            className="fixed bottom-0 inset-x-0 z-[100] bg-white rounded-t-3xl p-6 pb-10 shadow-2xl max-w-md mx-auto"
           >
             {/* Close */}
             <button
