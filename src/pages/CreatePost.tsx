@@ -1,11 +1,11 @@
+import { errorMessage, errorField } from '../utils/errors';
 import { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Sparkles, Loader2, X, Camera, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
-import { auth } from '../lib/firebase';
+import { api, getAccessToken } from '../lib/api';
+import { useAuth } from '../contexts/auth';
 import VideoRecorder from '../components/VideoRecorder';
 import { socialService } from '../services/social';
 
@@ -23,10 +23,12 @@ function uploadVideo(file: File, token: string, onProgress: (pct: number) => voi
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
-      let data: any = {};
+      let data: unknown = {};
       try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; } catch { /* fall through */ }
-      if (xhr.status >= 200 && xhr.status < 300 && data.url) resolve(data);
-      else reject(new Error(data.error ?? 'Upload failed'));
+      const url = errorField(data, 'url');
+      const error = errorField(data, 'error');
+      if (xhr.status >= 200 && xhr.status < 300 && typeof url === 'string' && url) resolve({ url });
+      else reject(new Error(typeof error === 'string' ? error : 'Upload failed'));
     };
     xhr.onerror = () => reject(new Error('Upload failed — check your connection'));
     const formData = new FormData();
@@ -103,14 +105,14 @@ export default function CreatePost() {
     try {
       // Upload stays on the existing, stable multer endpoint — that's not part
       // of the social contract Codex is reconciling, so it isn't mocked here.
-      const token = localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
+      const token = (await getAccessToken()) ?? '';
       const { url } = await uploadVideo(file, token, setUploadProgress);
       setPublishPhase('publishing');
       await socialService.createPost({ videoUrl: url, caption: caption.trim() || undefined });
       toast.success('Post published!');
       navigate('/home');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to publish');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to publish'));
       setPublishPhase('idle');
     }
   }
@@ -122,7 +124,7 @@ export default function CreatePost() {
     : 'Share Post';
 
   return (
-    <div className="min-h-screen bg-[#050508]">
+    <div className="min-h-screen bg-[#050508] lg:pl-[220px]">
 
       {/* ── Header ── */}
       <div className="sticky top-0 z-10 bg-[#050508]/95 backdrop-blur-xl border-b border-white/6 flex items-center justify-between px-4 py-3">

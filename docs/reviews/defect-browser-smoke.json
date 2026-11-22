@@ -1,0 +1,118 @@
+{
+  "checkedAt": "2026-11-22T03:01:39.337Z",
+  "externalRequestsBlocked": true,
+  "scope": "Public routes, authentication redirects and responsive layout only; no live account or provider operations",
+  "results": [
+    {
+      "width": 1440,
+      "height": 900,
+      "route": "/",
+      "expected": "/",
+      "path": "/",
+      "ready": "complete",
+      "text": 960,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "route": "/login",
+      "expected": "/login",
+      "path": "/login",
+      "ready": "complete",
+      "text": 132,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "route": "/signup",
+      "expected": "/signup",
+      "path": "/signup",
+      "ready": "complete",
+      "text": 224,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "route": "/home",
+      "expected": "/login",
+      "path": "/login",
+      "ready": "complete",
+      "text": 132,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "route": "/missing-route",
+      "expected": "/",
+      "path": "/",
+      "ready": "complete",
+      "text": 960,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "route": "/",
+      "expected": "/",
+      "path": "/",
+      "ready": "complete",
+      "text": 936,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "route": "/login",
+      "expected": "/login",
+      "path": "/login",
+      "ready": "complete",
+      "text": 132,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "route": "/signup",
+      "expected": "/signup",
+      "path": "/signup",
+      "ready": "complete",
+      "text": 224,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "route": "/home",
+      "expected": "/login",
+      "path": "/login",
+      "ready": "complete",
+      "text": 132,
+      "overflow": false,
+      "passed": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "route": "/missing-route",
+      "expected": "/",
+      "path": "/",
+      "ready": "complete",
+      "text": 936,
+      "overflow": false,
+      "passed": true
+    }
+  ],
+  "exceptions": []
+}

@@ -24,6 +24,8 @@ export interface SocialPost {
   reactions: Record<string, number>;
   /** Emojis *this* viewer has reacted with — multi-select, not single-choice. */
   viewerReactions: string[];
+  saveCount: number;
+  isSaved: boolean;
   replyCount: number;
   parentPostId: string | null;
   createdAt: string;

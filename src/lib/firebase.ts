@@ -19,8 +19,7 @@ if (isRealConfig) {
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
   auth = getAuth(app);
 } else {
-  // Demo mode: initialize with a minimal valid-looking config.
-  // Real auth calls will fail gracefully; the backend accepts demo tokens.
+  // Keep initialization safe when configuration is absent. Production never uses demo identities.
   const demoConfig = {
     apiKey: 'demo-key',
     authDomain: 'demo.firebaseapp.com',
@@ -32,11 +31,11 @@ if (isRealConfig) {
   app = getApps().length === 0 ? initializeApp(demoConfig) : getApps()[0];
   auth = getAuth(app);
   console.warn(
-    '[Firebase] Running in demo mode. Add real VITE_FIREBASE_* values to .env.development to enable auth.'
+    '[Firebase] Authentication is not configured. Add VITE_FIREBASE_* settings to enable sign-in.'
   );
 }
 
 export { auth };
 export { isRealConfig as isFirebaseConfigured };
-export const isDemoMode = !isRealConfig;
+export const isDemoMode = !isRealConfig && import.meta.env.DEV;
 export default app;

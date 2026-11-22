@@ -1,16 +1,19 @@
+import { activeUserIdentityWhere } from '../lib/access';
 import express from 'express';
-import Stripe from 'stripe';
+import { createStripeClient, type StripeClient } from '../lib/stripe';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
+import { publicProfile, publicProfileSelect } from '../lib/profiles';
+import { visibleUserWhere } from '../lib/access';
 
 const router = express.Router();
 
 // Stripe initializes lazily so missing key doesn't crash the server on boot
-function getStripe(): Stripe | null {
+function getStripe(): StripeClient | null {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key || key.startsWith('sk_test_your')) return null;
-  return new Stripe(key, { apiVersion: '2024-04-10' as any });
+  return createStripeClient(key);
 }
 
 const FREE_DAILY_LIKES = 20;
@@ -20,7 +23,7 @@ const BOOST_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 router.get('/status', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { isPremium: true, boostedUntil: true, subscriptionId: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -29,13 +32,13 @@ router.get('/status', authenticateToken, async (req: AuthenticatedRequest, res) 
     startOfDay.setHours(0, 0, 0, 0);
 
     const dbUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
 
     const likesToday = dbUser
       ? await prisma.like.count({
-          where: { senderId: dbUser.id, isSuper: false, createdAt: { gte: startOfDay } },
+          where: { senderId: dbUser.id, isSuper: false, isPass: false, createdAt: { gte: startOfDay } },
         })
       : 0;
 
@@ -45,7 +48,7 @@ router.get('/status', authenticateToken, async (req: AuthenticatedRequest, res) 
       boostedUntil: user.boostedUntil,
       hasSubscription: !!user.subscriptionId,
       likesToday,
-      likesRemaining: user.isPremium ? Infinity : Math.max(0, FREE_DAILY_LIKES - likesToday),
+      likesRemaining: user.isPremium ? null : Math.max(0, FREE_DAILY_LIKES - likesToday),
       stripeEnabled: !!getStripe(),
     });
   } catch (error) {
@@ -63,7 +66,7 @@ router.post('/checkout', authenticateToken, async (req: AuthenticatedRequest, re
 
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, email: true, stripeCustomerId: true, isPremium: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -105,23 +108,22 @@ router.post('/checkout', authenticateToken, async (req: AuthenticatedRequest, re
 // ── POST /api/premium/webhook (raw body — registered before express.json in server.ts) ──
 export async function handleStripeWebhook(req: express.Request, res: express.Response) {
   const stripe = getStripe();
-  if (!stripe) return res.status(200).json({ received: true }); // graceful no-op
+  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: 'Payments are temporarily unavailable' });
 
   const sig = req.headers['stripe-signature'] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? '';
 
-  let event: Stripe.Event;
+  let event: ReturnType<StripeClient['webhooks']['constructEvent']>;
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err: any) {
-    console.error('Webhook signature error:', err.message);
-    return res.status(400).json({ error: `Webhook Error: ${err.message}` });
+  } catch {
+    return res.status(400).json({ error: 'Invalid webhook signature' });
   }
 
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
-        const session = event.data.object as Stripe.Checkout.Session;
+        const session = event.data.object;
         const userId = session.metadata?.userId;
         if (userId && session.subscription) {
           await prisma.user.update({
@@ -135,18 +137,22 @@ export async function handleStripeWebhook(req: express.Request, res: express.Res
         }
         break;
       }
-      case 'customer.subscription.deleted':
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        await prisma.user.updateMany({ where: { subscriptionId: sub.id }, data: { isPremium: false, subscriptionId: null } });
+        break;
+      }
       case 'customer.subscription.paused': {
-        const sub = event.data.object as Stripe.Subscription;
+        const sub = event.data.object;
         await prisma.user.updateMany({
           where: { subscriptionId: sub.id },
-          data: { isPremium: false, subscriptionId: null },
+          data: { isPremium: false },
         });
         break;
       }
       case 'customer.subscription.resumed':
       case 'customer.subscription.updated': {
-        const sub = event.data.object as Stripe.Subscription;
+        const sub = event.data.object;
         const active = sub.status === 'active' || sub.status === 'trialing';
         await prisma.user.updateMany({
           where: { subscriptionId: sub.id },
@@ -157,6 +163,7 @@ export async function handleStripeWebhook(req: express.Request, res: express.Res
     }
   } catch (err) {
     console.error('Webhook handler error:', err);
+    return res.status(500).json({ error: 'Webhook processing failed' });
   }
 
   res.json({ received: true });
@@ -169,7 +176,7 @@ router.post('/cancel', authenticateToken, async (req: AuthenticatedRequest, res)
 
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { subscriptionId: true },
     });
     if (!user?.subscriptionId) {
@@ -189,7 +196,7 @@ router.post('/cancel', authenticateToken, async (req: AuthenticatedRequest, res)
 router.post('/boost', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, isPremium: true, boostedUntil: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -213,7 +220,7 @@ router.post('/boost', authenticateToken, async (req: AuthenticatedRequest, res) 
 router.get('/likes-received', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, isPremium: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -226,17 +233,10 @@ router.get('/likes-received', authenticateToken, async (req: AuthenticatedReques
     const myLikedIds = new Set(myLikes.map((l) => l.receiverId));
 
     const incomingLikes = await prisma.like.findMany({
-      where: { receiverId: user.id, senderId: { notIn: [...myLikedIds] } },
+      where: { receiverId: user.id, isPass: false, senderId: { notIn: [...myLikedIds] }, sender: visibleUserWhere(user.id) },
       include: {
         sender: {
-          select: {
-            id: true,
-            firstName: true,
-            profilePictures: true,
-            occupation: true,
-            dateOfBirth: true,
-            isVerified: true,
-          },
+          select: publicProfileSelect,
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -244,14 +244,10 @@ router.get('/likes-received', authenticateToken, async (req: AuthenticatedReques
 
     if (user.isPremium) {
       // Full profiles
-      res.json({ likes: incomingLikes, isPremium: true });
+      res.json({ likes: incomingLikes.map(like => ({ ...like, sender: publicProfile(like.sender) })), isPremium: true });
     } else {
       // Return count + blurred (empty pictures) for free users
-      const blurred = incomingLikes.map((l) => ({
-        ...l,
-        sender: { ...l.sender, firstName: '???', profilePictures: [], occupation: null },
-      }));
-      res.json({ likes: blurred, isPremium: false, count: incomingLikes.length });
+      res.json({ likes: [], isPremium: false, count: incomingLikes.length });
     }
   } catch (error) {
     console.error('Likes received error:', error);

@@ -1,30 +1,43 @@
+import { lazy, Suspense } from 'react';
 /**
  * ROUTING STRUCTURE
  * SOCIAL (primary): /home, /explore, /create, /notifications, /profile/:userId, /post/:postId
+ * MARKETPLACE (new, frontend-only mock backend): /marketplace, /marketplace/:listingId,
+ *   /marketplace/seller/:userId, /marketplace/create
+ * NIGHT OUT (new, frontend-only mock backend): /night-out, /night-out/:eventId,
+ *   /night-out/host/:hostId, /night-out/create
  * DATING (secondary): /dating  (Discover.tsx — DO NOT rewrite)
  * /discover redirects → /dating
  */
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import Landing      from '../pages/Landing';
-import Login        from '../pages/Login';
-import Signup       from '../pages/Signup';
-import ForgotPassword from '../pages/ForgotPassword';
-import Onboarding   from '../pages/Onboarding';
-import Discover     from '../pages/Discover';
-import Matches      from '../pages/Matches';
-import Chat         from '../pages/Chat';
-import MatchProfile from '../pages/MatchProfile';
-import Profile      from '../pages/Profile';
-import Settings     from '../pages/Settings';
-import Premium      from '../pages/Premium';
-import HomeFeed     from '../pages/HomeFeed';
-import Explore      from '../pages/Explore';
-import CreatePost   from '../pages/CreatePost';
-import Notifications from '../pages/Notifications';
-import PublicProfile from '../pages/PublicProfile';
-import PostDetail   from '../pages/PostDetail';
-import Studio       from '../pages/Studio';
+import { useAuth } from '../contexts/auth';
+const Landing = lazy(() => import('../pages/Landing'));
+const Login = lazy(() => import('../pages/Login'));
+const Signup = lazy(() => import('../pages/Signup'));
+const ForgotPassword = lazy(() => import('../pages/ForgotPassword'));
+const Onboarding = lazy(() => import('../pages/Onboarding'));
+const Discover = lazy(() => import('../pages/Discover'));
+const Matches = lazy(() => import('../pages/Matches'));
+const Chat = lazy(() => import('../pages/Chat'));
+const MatchProfile = lazy(() => import('../pages/MatchProfile'));
+const Profile = lazy(() => import('../pages/Profile'));
+const Settings = lazy(() => import('../pages/Settings'));
+const Premium = lazy(() => import('../pages/Premium'));
+const HomeFeed = lazy(() => import('../pages/HomeFeed'));
+const Explore = lazy(() => import('../pages/Explore'));
+const CreatePost = lazy(() => import('../pages/CreatePost'));
+const Notifications = lazy(() => import('../pages/Notifications'));
+const PublicProfile = lazy(() => import('../pages/PublicProfile'));
+const PostDetail = lazy(() => import('../pages/PostDetail'));
+const Studio = lazy(() => import('../pages/Studio'));
+const Marketplace = lazy(() => import('../pages/Marketplace'));
+const MarketplaceDetail = lazy(() => import('../pages/MarketplaceDetail'));
+const MarketplaceSeller = lazy(() => import('../pages/MarketplaceSeller'));
+const MarketplaceCreate = lazy(() => import('../pages/MarketplaceCreate'));
+const NightOut = lazy(() => import('../pages/NightOut'));
+const NightOutDetail = lazy(() => import('../pages/NightOutDetail'));
+const NightOutHost = lazy(() => import('../pages/NightOutHost'));
+const NightOutCreate = lazy(() => import('../pages/NightOutCreate'));
 
 function AuthLoading() {
   return (
@@ -35,9 +48,9 @@ function AuthLoading() {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, loading } = useAuth();
+  const { firebaseUser, loading, needsOnboarding } = useAuth();
   if (loading) return <AuthLoading />;
-  if (firebaseUser) return <Navigate to="/home" replace />;
+  if (firebaseUser && !needsOnboarding) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 
@@ -59,6 +72,7 @@ function OnboardingRoute({ children }: { children: React.ReactNode }) {
 
 export default function AppRoutes() {
   return (
+    <Suspense fallback={<AuthLoading />}>
     <Routes>
       {/* Public */}
       <Route path="/"               element={<Landing />} />
@@ -78,6 +92,18 @@ export default function AppRoutes() {
       <Route path="/post/:postId"   element={<PrivateRoute><PostDetail /></PrivateRoute>} />
       <Route path="/studio"         element={<PrivateRoute><Studio /></PrivateRoute>} />
 
+      {/* Marketplace (new vertical, frontend-only mock backend) */}
+      <Route path="/marketplace"                element={<PrivateRoute><Marketplace /></PrivateRoute>} />
+      <Route path="/marketplace/create"         element={<PrivateRoute><MarketplaceCreate /></PrivateRoute>} />
+      <Route path="/marketplace/seller/:userId" element={<PrivateRoute><MarketplaceSeller /></PrivateRoute>} />
+      <Route path="/marketplace/:listingId"     element={<PrivateRoute><MarketplaceDetail /></PrivateRoute>} />
+
+      {/* Night Out (new vertical, frontend-only mock backend) */}
+      <Route path="/night-out"              element={<PrivateRoute><NightOut /></PrivateRoute>} />
+      <Route path="/night-out/create"       element={<PrivateRoute><NightOutCreate /></PrivateRoute>} />
+      <Route path="/night-out/host/:hostId" element={<PrivateRoute><NightOutHost /></PrivateRoute>} />
+      <Route path="/night-out/:eventId"     element={<PrivateRoute><NightOutDetail /></PrivateRoute>} />
+
       {/* Dating (secondary — Discover stays at /dating, never rewritten) */}
       <Route path="/dating"         element={<PrivateRoute><Discover /></PrivateRoute>} />
       <Route path="/discover"       element={<Navigate to="/dating" replace />} />
@@ -93,5 +119,6 @@ export default function AppRoutes() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }

@@ -1,0 +1,226 @@
+{
+  "reviewDate": "2026-11-21",
+  "timezone": "America/New_York",
+  "completedAt": "2026-11-22T02:16:54.616Z",
+  "scope": {
+    "frontend": ".",
+    "backend": "backend",
+    "excluded": "The separate frontend/ manifest is not used by the configured root deployment."
+  },
+  "result": "Dependency security upgrades applied locally and verified; existing application and backend compilation defects still require separate work.",
+  "audits": {
+    "interpretation": "npm affected-package counts include transitive and inherited findings. Zero findings means no advisories reported by this scan, not proof of application security.",
+    "frontend": {
+      "before": {
+        "info": 0,
+        "low": 2,
+        "moderate": 17,
+        "high": 20,
+        "critical": 5,
+        "total": 44
+      },
+      "after": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "productionAfter": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      }
+    },
+    "backend": {
+      "before": {
+        "info": 0,
+        "low": 1,
+        "moderate": 15,
+        "high": 15,
+        "critical": 6,
+        "total": 37
+      },
+      "after": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      },
+      "productionAfter": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      }
+    }
+  },
+  "installedVersions": {
+    "frontend": {
+      "firebase": "12.19.0",
+      "react-router-dom": "7.18.6",
+      "socket.io-client": "4.8.4",
+      "vite": "7.3.8",
+      "@vitejs/plugin-react": "5.2.0",
+      "concurrently": "9.2.5",
+      "postcss": "8.5.33",
+      "eslint": "9.39.5",
+      "typescript-eslint": "8.73.0",
+      "tailwindcss": "3.4.19"
+    },
+    "backend": {
+      "express": "4.22.3",
+      "firebase-admin": "14.5.1",
+      "multer": "2.5.0",
+      "sharp": "0.35.5",
+      "socket.io": "4.8.4",
+      "zod": "4.6.7",
+      "@anthropic-ai/sdk": "0.91.1",
+      "vite": "7.3.8",
+      "vitest": "5.1.1"
+    }
+  },
+  "dependencyDecisions": [
+    "Keep Express 4 and React 18; apply patched versions without a framework rewrite.",
+    "Use Firebase 12.19.0 for the existing Node 22 environment; Firebase 13 dependencies require Node 24.12 or newer.",
+    "Scope the @grpc/grpc-js override to @firebase/firestore, upgrading from its pinned 1.9 line to the patched 1.14.7 line. Firestore is not imported by this application.",
+    "Remove unused Swiper, bcryptjs, jsonwebtoken, node-cron, winston and their unused direct type packages. jsonwebtoken remains where required transitively.",
+    "Move js-yaml to backend development dependencies because it is used only by contract tests.",
+    "Update compatible transitive packages, including Socket.IO parsers, Engine.IO, ws, proxy-addr, and build/lint dependencies."
+  ],
+  "compatibilityChanges": [
+    "Migrate Firebase Admin auth, app initialization and messaging to modular APIs.",
+    "Set projectId when initializing Firebase from service-account JSON so the existing verification branch runs.",
+    "Update Zod record validation for JSON preferences.",
+    "Limit multipart requests to one file and no extra fields; return 413 for oversized files and 400 for other Multer limit errors.",
+    "Use ESM Vitest configuration and separate isolated unit tests from database-backed integration tests.",
+    "Configure Node 22 in the backend Dockerfile and frontend Nixpacks build; deployment installs use npm ci."
+  ],
+  "verification": {
+    "backendCleanInstall": {
+      "command": "cd backend && npm ci --no-audit --no-fund",
+      "passed": true
+    },
+    "backendUnit": {
+      "command": "cd backend && npm test",
+      "passed": true,
+      "files": 5,
+      "tests": 20,
+      "coverageAreas": [
+        "multipart upload storage, resizing, limits, auth and cleanup",
+        "Firebase service-account JSON verification, invalid tokens and push client",
+        "Socket.IO WebSocket and polling delivery plus access checks",
+        "Zod preference validation",
+        "existing social authentication checks"
+      ],
+      "limitation": "Database, external Firebase token verification, push delivery and Judge dependencies are mocked. These are not end-to-end production service tests."
+    },
+    "frontendTypecheck": {
+      "command": "npm run typecheck",
+      "passed": true
+    },
+    "frontendBuild": {
+      "command": "npm run build",
+      "passed": true,
+      "mainJavascriptKilobytes": 830.39,
+      "mainJavascriptGzipKilobytes": 239,
+      "warnings": [
+        "main chunk exceeds 500 kB",
+        "existing NODE_ENV=production entry in a Vite environment file"
+      ]
+    },
+    "frontendBrowser": {
+      "passed": true,
+      "checks": 10,
+      "widths": [
+        1440,
+        390
+      ],
+      "routes": [
+        "/",
+        "/login",
+        "/signup",
+        "/home redirects to /login",
+        "unknown route redirects to /"
+      ],
+      "exceptions": [],
+      "externalRequests": "blocked",
+      "horizontalOverflow": false
+    },
+    "backendTypecheck": {
+      "passed": false,
+      "baselineErrors": 27,
+      "currentErrors": 24,
+      "groups": {
+        "src/lib/geocoding.ts": 1,
+        "src/routes/judge.ts": 16,
+        "src/routes/premium.ts": 6,
+        "src/socket/chat.ts": 1
+      },
+      "newUpgradeErrors": 0
+    },
+    "frontendLint": {
+      "passed": false,
+      "scope": "src",
+      "errors": 49,
+      "warnings": 8,
+      "fatalParserErrors": 0
+    },
+    "diffWhitespaceCheck": {
+      "passed": true
+    },
+    "databaseIntegration": {
+      "run": false,
+      "reason": "Existing integration helpers delete database fixtures using the configured environment; no isolated test database was provisioned."
+    },
+    "liveServiceIntegration": {
+      "run": false,
+      "services": [
+        "Firebase sign-in",
+        "push delivery",
+        "Stripe",
+        "deployed media storage"
+      ]
+    },
+    "containerBuild": {
+      "run": false
+    }
+  },
+  "remainingPriorities": [
+    {
+      "priority": 1,
+      "task": "Fix existing backend compilation defects: missing Judge Prisma models (including the chat send path), Stripe typings and geocoding response typing. The current build script masks TypeScript failure with || true."
+    },
+    {
+      "priority": 1,
+      "task": "Make production authentication fail closed when Firebase configuration is absent or invalid; the demo fallback still exists."
+    },
+    {
+      "priority": 1,
+      "task": "Enforce file ownership and safe paths in upload deletion; enforce membership checks for typing and read receipt events; resolve privacy issues from the original review."
+    },
+    {
+      "priority": 2,
+      "task": "Resolve existing lint findings and split the large initial frontend bundle."
+    },
+    {
+      "priority": 2,
+      "task": "Run integration and live-service validation against isolated staging services before release."
+    }
+  ],
+  "artifacts": {
+    "baseline": "dependency-audit-2026-11-21.json",
+    "frontendAudit": "dependency-audit-after-frontend-2026-11-21.json",
+    "backendAudit": "dependency-audit-after-backend-2026-11-21.json",
+    "browser": "dependency-browser-smoke-2026-11-21.json",
+    "typecheck": "dependency-backend-typecheck-2026-11-21.json"
+  }
+}

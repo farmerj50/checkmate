@@ -17,6 +17,7 @@ export interface SocialService {
   getFeed(cursor?: string): Promise<Page<SocialPost>>;
   /** Paginated, matching the real GET /social/posts/user/:userId contract (posts + nextCursor). */
   getUserPosts(userId: string, cursor?: string): Promise<Page<SocialPost>>;
+  getSavedPosts(cursor?: string): Promise<Page<SocialPost>>;
   getPost(postId: string): Promise<SocialPost | null>;
   getReplies(postId: string, cursor?: string): Promise<Page<SocialPost>>;
 
@@ -29,6 +30,9 @@ export interface SocialService {
   /** Removes `emoji` from the viewer's reactions on this post. */
   clearReaction(postId: string, emoji: string): Promise<SocialPost>;
 
+  savePost(postId: string): Promise<SocialPost>;
+  unsavePost(postId: string): Promise<SocialPost>;
+
   getFollowStatus(userId: string): Promise<FollowStatus>;
   follow(userId: string): Promise<FollowStatus>;
   unfollow(userId: string): Promise<FollowStatus>;
@@ -37,7 +41,7 @@ export interface SocialService {
   block(userId: string): Promise<void>;
   unblock(userId: string): Promise<void>;
 
-  // Notifications — an existing, stable CheckMate contract (GET
+  // Notifications — an existing, stable Vipi contract (GET
   // /social/notifications, GET /social/notifications/unread-count, PUT
   // /social/notifications/:id/read, PUT /social/notifications/read-all).
   // Not part of what Codex reconciled for posts/replies/reactions.

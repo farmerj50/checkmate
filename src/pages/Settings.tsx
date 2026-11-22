@@ -5,7 +5,7 @@ import {
   ArrowLeft, ChevronRight, LogOut, Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { api } from '../lib/api';
 import type { UserPreference } from '../types';
 
@@ -109,7 +109,7 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-24">
+    <div className="min-h-screen bg-gray-50 pb-24 lg:pl-[220px]">
       {/* Header */}
       <div className="sticky top-0 bg-white border-b border-gray-100 z-10">
         <div className="flex items-center gap-3 px-4 py-4">
@@ -218,7 +218,7 @@ export default function Settings() {
             </button>
           </div>
 
-          <p className="text-center text-xs text-gray-300 pb-4">CheckMate v0.1.0</p>
+          <p className="text-center text-xs text-gray-300 pb-4">Vipi v0.1.0</p>
         </div>
       )}
     </div>

@@ -1,8 +1,10 @@
 import { BrowserRouter, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
+import { NotificationCountProvider } from './contexts/NotificationCountContext';
 import AppRoutes from './routes/AppRoutes';
 import Navigation from './components/Navigation';
+import DesktopSidebar from './components/DesktopSidebar';
 
 const NO_NAV_PATHS = ['/', '/login', '/signup', '/forgot-password', '/onboarding'];
 
@@ -17,6 +19,7 @@ function AppShell() {
     <div className="min-h-screen bg-gray-50">
       <AppRoutes />
       {showNav && <Navigation />}
+      {showNav && <DesktopSidebar />}
       <Toaster
         position="top-center"
         toastOptions={{
@@ -37,7 +40,9 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppShell />
+        <NotificationCountProvider>
+          <AppShell />
+        </NotificationCountProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -1,7 +1,9 @@
+import { activeUserIdentityWhere } from '../lib/access';
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
+import { blockUser } from '../lib/access';
 
 const router = express.Router();
 
@@ -27,7 +29,7 @@ router.post('/report', authenticateToken, async (req: AuthenticatedRequest, res)
     }
 
     const reporter = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!reporter) return res.status(404).json({ error: 'User not found' });
@@ -71,7 +73,7 @@ router.post('/block/:userId', authenticateToken, async (req: AuthenticatedReques
     const { userId: blockedId } = req.params;
 
     const blocker = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!blocker) return res.status(404).json({ error: 'User not found' });
@@ -80,22 +82,9 @@ router.post('/block/:userId', authenticateToken, async (req: AuthenticatedReques
       return res.status(400).json({ error: 'Cannot block yourself' });
     }
 
-    const block = await prisma.block.upsert({
-      where: { blockerId_blockedId: { blockerId: blocker.id, blockedId } },
-      update: {},
-      create: { blockerId: blocker.id, blockedId },
-    });
-
-    // Also deactivate any existing match between them
-    await prisma.match.updateMany({
-      where: {
-        OR: [
-          { user1Id: blocker.id, user2Id: blockedId },
-          { user1Id: blockedId, user2Id: blocker.id },
-        ],
-      },
-      data: { isActive: false },
-    });
+    const target = await prisma.user.findUnique({ where: { id: blockedId }, select: { id: true } });
+    if (!target) return res.status(404).json({ error: 'User not found' });
+    const block = await blockUser(blocker.id, blockedId);
 
     res.json({ block });
   } catch (error) {
@@ -110,7 +99,7 @@ router.delete('/block/:userId', authenticateToken, async (req: AuthenticatedRequ
     const { userId: blockedId } = req.params;
 
     const blocker = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!blocker) return res.status(404).json({ error: 'User not found' });
@@ -130,7 +119,7 @@ router.delete('/block/:userId', authenticateToken, async (req: AuthenticatedRequ
 router.get('/blocked', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -152,7 +141,7 @@ router.get('/blocked', authenticateToken, async (req: AuthenticatedRequest, res)
 router.post('/verify', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, verificationStatus: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -161,14 +150,9 @@ router.post('/verify', authenticateToken, async (req: AuthenticatedRequest, res)
       return res.status(400).json({ error: 'Already verified' });
     }
 
-    // In production: store the selfie URL and queue for human/AI review
-    // For now: auto-approve after submission (demonstrating the flow)
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: { verificationStatus: 'VERIFIED', isVerified: true },
-    });
-
-    res.json({ verificationStatus: updated.verificationStatus, isVerified: updated.isVerified });
+    // A request alone is not evidence of identity. Enable this only after a
+    // trusted verification provider or a private human-review workflow exists.
+    return res.status(503).json({ error: 'Identity verification is not available yet' });
   } catch (error) {
     console.error('Verify error:', error);
     res.status(500).json({ error: 'Failed to submit verification' });
@@ -181,7 +165,7 @@ router.put('/fcm-token', authenticateToken, async (req: AuthenticatedRequest, re
     const { token } = z.object({ token: z.string().min(1) }).parse(req.body);
 
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });

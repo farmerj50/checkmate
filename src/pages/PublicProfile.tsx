@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { socialService, type SocialPost } from '../services/social';
-import { normalizeAssetUrl, calculateAge } from '../utils/helpers';
+import { normalizeAssetUrl } from '../utils/helpers';
 import FollowButton from '../components/FollowButton';
 import ReportModal from '../components/ReportModal';
 import type { FollowStatus } from '../types';
@@ -18,7 +18,7 @@ interface ProfileUser {
   profileVideo?: string;
   isVerified: boolean;
   occupation?: string;
-  dateOfBirth: string;
+  age: number | null;
 }
 
 export default function PublicProfile() {
@@ -87,7 +87,7 @@ export default function PublicProfile() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050508] pb-20">
+    <div className="min-h-screen bg-[#050508] pb-20 lg:pl-[220px]">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-[#050508]/90 backdrop-blur-md border-b border-white/5 px-4 py-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -158,7 +158,7 @@ export default function PublicProfile() {
                   {user.isVerified && <BadgeCheck className="w-5 h-5 text-[#ff4d8d] flex-none" />}
                 </div>
                 {user.occupation && <p className="text-white/40 text-sm truncate">{user.occupation}</p>}
-                {user.dateOfBirth && <p className="text-white/30 text-xs">{calculateAge(user.dateOfBirth)} years old</p>}
+                {user.age != null && <p className="text-white/30 text-xs">{user.age} years old</p>}
               </div>
             </div>
 

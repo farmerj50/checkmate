@@ -63,10 +63,13 @@ model User {
   followers        Follow[]        @relation("FollowFollowing")
   posts            Post[]          @relation("PostAuthor")
   postReactions    PostReaction[]  @relation("PostReactionUser")
+  savedPosts       SavedPost[]     @relation("SavedPostUser")
   notifications    Notification[]  @relation("NotificationUser")
   userPrompt       UserPrompt?
   profileViewsMade     ProfileView[] @relation("ProfileViewViewer")
   profileViewsReceived ProfileView[] @relation("ProfileViewViewed")
+  judgeRequests        JudgeSession[] @relation("JudgeRequester")
+  judgeEvents          JudgeEvent[] @relation("JudgeActor")
 
   @@map("users")
 }
@@ -103,6 +106,7 @@ model Like {
   senderId   String
   receiverId String
   isSuper    Boolean  @default(false)
+  isPass     Boolean  @default(false)
   signalType String?  // 'INTRIGUED' | 'STIMULATING' | 'HIGH_VALUE' | 'ALIGNED'
   createdAt  DateTime @default(now())
 
@@ -123,9 +127,61 @@ model Match {
   user1    User      @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
   user2    User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
   messages Message[]
+  judgeSession JudgeSession?
 
   @@unique([user1Id, user2Id])
   @@map("matches")
+}
+
+enum JudgeStatus {
+  REQUESTED
+  ACTIVE
+  TIER1_NOTICE
+  RECOMMENDED_STOP
+  COOLDOWN
+  PAUSED
+  DECLINED
+}
+
+model JudgeSession {
+  id                   String @id @default(cuid())
+  matchId              String @unique
+  requestedById        String
+  status               JudgeStatus @default(REQUESTED)
+  tier                 Int @default(0)
+  userAApproved        Boolean @default(false)
+  userBApproved        Boolean @default(false)
+  userAAgreesToStop     Boolean @default(false)
+  userBAgreesToStop     Boolean @default(false)
+  userAWantsToContinue Boolean @default(false)
+  userBWantsToContinue Boolean @default(false)
+  judgeRecommendedStop Boolean @default(false)
+  judgeStrikeCount     Int @default(0)
+  stopReason           String?
+  confidenceLevel      String?
+  cooldownEndsAt       DateTime?
+  summary              String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  match                Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  requestedBy          User @relation("JudgeRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  events               JudgeEvent[]
+
+  @@map("judge_sessions")
+}
+
+model JudgeEvent {
+  id        String @id @default(cuid())
+  sessionId String
+  type      String
+  actorId   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  session   JudgeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  actor     User? @relation("JudgeActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+  @@map("judge_events")
 }
 
 model Message {
@@ -258,6 +314,7 @@ model Post {
 
   author    User           @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   reactions PostReaction[]
+  savedBy   SavedPost[]
   // Self-relation: a post may be a reply to another post
   parent    Post?          @relation("PostReplies", fields: [parentPostId], references: [id])
   replies   Post[]         @relation("PostReplies")
@@ -363,4 +420,18 @@ model ProfileView {
   @@unique([viewerId, viewedId])
   @@index([viewedId, createdAt])
   @@map("profile_views")
+}
+
+model SavedPost {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation("SavedPostUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+  @@map("saved_posts")
 }

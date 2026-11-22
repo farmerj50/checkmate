@@ -81,6 +81,8 @@ describe('Social E2E', () => {
     expect(created.body.post.reactionCount).toBe(0);
     expect(created.body.post.reactions).toEqual({});
     expect(created.body.post.viewerReactions).toEqual([]);
+    expect(created.body.post.saveCount).toBe(0);
+    expect(created.body.post.isSaved).toBe(false);
     const postId = created.body.post.id;
 
     await request(app).post(`/api/social/posts/${postId}/reactions`).set(authHeader(A)).send({ emoji: fire }).expect(200);
@@ -125,6 +127,8 @@ describe('Social E2E', () => {
     expect(reply.status).toBe(201);
     expect(reply.body.post.reactions).toEqual({});
     expect(reply.body.post.viewerReactions).toEqual([]);
+    expect(reply.body.post.saveCount).toBe(0);
+    expect(reply.body.post.isSaved).toBe(false);
     await request(app).post(`/api/social/posts/${reply.body.post.id}/reactions`).set(authHeader(B)).send({ emoji: heart }).expect(200);
 
     const replies = await request(app).get(`/api/social/posts/${postId}/replies`).set(authHeader(B));
@@ -132,6 +136,65 @@ describe('Social E2E', () => {
     const replyFromList = replies.body.replies.find((post: any) => post.id === reply.body.post.id);
     expect(replyFromList.reactions).toEqual({ [heart]: 1 });
     expect(replyFromList.viewerReactions).toEqual([heart]);
+  });
+
+  it('saved videos: save and unsave are idempotent, viewer-specific, and respect block/delete rules', async () => {
+    const created = await request(app)
+      .post('/api/social/posts')
+      .set(authHeader(B))
+      .send({ videoUrl: 'http://example.test/save.mp4' });
+    expect(created.status).toBe(201);
+    expect(created.body.post.saveCount).toBe(0);
+    expect(created.body.post.isSaved).toBe(false);
+    const postId = created.body.post.id;
+
+    let res = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: true, count: 1 });
+
+    res = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: true, count: 1 });
+
+    const asAlice = await request(app).get(`/api/social/posts/${postId}`).set(authHeader(A));
+    expect(asAlice.status).toBe(200);
+    expect(asAlice.body.post.saveCount).toBe(1);
+    expect(asAlice.body.post.isSaved).toBe(true);
+
+    const asBob = await request(app).get(`/api/social/posts/${postId}`).set(authHeader(B));
+    expect(asBob.status).toBe(200);
+    expect(asBob.body.post.saveCount).toBe(1);
+    expect(asBob.body.post.isSaved).toBe(false);
+
+    const saved = await request(app).get('/api/social/posts/saved').set(authHeader(A));
+    expect(saved.status).toBe(200);
+    expect(saved.body.posts.map((post: any) => post.id)).toContain(postId);
+    const savedPost = saved.body.posts.find((post: any) => post.id === postId);
+    expect(savedPost.saveCount).toBe(1);
+    expect(savedPost.isSaved).toBe(true);
+
+    res = await request(app).delete(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: false, count: 0 });
+
+    res = await request(app).delete(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ saved: false, count: 0 });
+
+    const afterUnsave = await request(app).get(`/api/social/posts/${postId}`).set(authHeader(A));
+    expect(afterUnsave.status).toBe(200);
+    expect(afterUnsave.body.post.saveCount).toBe(0);
+    expect(afterUnsave.body.post.isSaved).toBe(false);
+
+    const blocked = await request(app).post(`/api/social/block/${created.body.post.authorId}`).set(authHeader(A)).send();
+    expect(blocked.status).toBe(200);
+    const blockedSave = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(blockedSave.status).toBe(403);
+
+    await request(app).delete(`/api/social/block/${created.body.post.authorId}`).set(authHeader(A)).send().expect(200);
+    await request(app).delete(`/api/social/posts/${postId}`).set(authHeader(B)).send().expect(200);
+    const deletedSave = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(deletedSave.status).toBe(404);
   });
 
   it('block removes follow, idempotent block/unblock, self-block rejected', async () => {

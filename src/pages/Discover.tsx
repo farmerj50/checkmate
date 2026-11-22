@@ -1,19 +1,18 @@
+import { errorField } from '../utils/errors';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Heart, X, MapPin, BadgeCheck,
   Settings, Sparkles, Info, RefreshCw,
   Volume2, VolumeX, ChevronUp, Video, Camera,
-  Home, Search, Flame, PlusSquare, User as UserIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PremiumGate from '../components/PremiumGate';
 import SignalButtons from '../components/SignalButtons';
 import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
-import { calculateAge } from '../utils/helpers';
-import type { SwipeCard as SwipeCardType, Match, User, SignalType } from '../types';
+import { useAuth } from '../contexts/auth';
+import type { SwipeCard as SwipeCardType, Match, User, PublicUser, SignalType } from '../types';
 
 // Ken Burns classes for static photos
 const KB_CLASSES = ['kb1', 'kb2', 'kb3', 'kb4'];
@@ -27,7 +26,7 @@ const LOOKING_FOR_META: Record<string, { label: string; bg: string }> = {
 
 // ── Match Overlay ─────────────────────────────────────────────────────────────
 function MatchOverlay({ match, currentUser, onClose, onMessage }: {
-  match: Match & { otherUser: User };
+  match: Match & { otherUser: PublicUser };
   currentUser: User;
   onClose: () => void;
   onMessage: () => void;
@@ -238,7 +237,7 @@ function FeedCard({
     setTimeout(() => { setFlash(null); cb(); }, 420);
   };
 
-  const age = calculateAge(user.dateOfBirth);
+  const age = user.age;
   const recentlyActive = user.lastActive
     ? Date.now() - new Date(user.lastActive).getTime() < 48 * 3_600_000
     : false;
@@ -429,7 +428,7 @@ function FeedCard({
           {/* Name + verified + online dot */}
           <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
             <h2 className="text-white text-[22px] font-bold leading-tight drop-shadow-lg">
-              {user.firstName}, {age}
+              {user.firstName}{age != null ? `, ${age}` : ''}
             </h2>
             {user.isVerified && <BadgeCheck className="w-5 h-5 text-blue-400 flex-shrink-0" />}
             {recentlyActive && (
@@ -446,7 +445,7 @@ function FeedCard({
           <div className="flex items-center gap-1 mb-2">
             <MapPin className="w-3 h-3 text-white/40 flex-shrink-0" />
             <span className="text-white/40 text-xs">
-              {distance < 1 ? '< 1 km away' : `${Math.round(distance)} km away`}
+              {distance == null ? 'Distance hidden' : distance < 1 ? '< 1 km away' : `${Math.round(distance)} km away`}
             </span>
           </div>
 
@@ -562,7 +561,7 @@ function FeedCard({
                 )}
                 <div className="bg-white/5 rounded-2xl p-3">
                   <p className="text-white/30 text-xs mb-0.5">Distance</p>
-                  <p className="text-white font-medium text-sm">{distance < 1 ? '< 1 km' : `${Math.round(distance)} km`}</p>
+                  <p className="text-white font-medium text-sm">{distance == null ? 'Distance hidden' : distance < 1 ? '< 1 km' : `${Math.round(distance)} km`}</p>
                 </div>
                 {user.occupation && (
                   <div className="bg-white/5 rounded-2xl p-3">
@@ -705,7 +704,7 @@ function FeedCard({
               )}
             </div>
             <div className="text-white/60">
-              {lf?.label ?? user.lookingFor} • {distance < 1 ? '< 1 km' : `${Math.round(distance)} km`}
+              {lf?.label ?? user.lookingFor} • {distance == null ? 'Distance hidden' : distance < 1 ? '< 1 km' : `${Math.round(distance)} km`}
             </div>
             <div className="text-white/40">
               👁 {mediaIndex + 1} of {mediaItems.length} media
@@ -758,7 +757,7 @@ export default function Discover() {
   const [viewIndex, setViewIndex]     = useState(0);
   const [direction, setDirection]     = useState<1 | -1>(1);
   const [loading, setLoading]         = useState(true);
-  const [newMatch, setNewMatch]       = useState<(Match & { otherUser: User }) | null>(null);
+  const [newMatch, setNewMatch]       = useState<(Match & { otherUser: PublicUser }) | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [premiumGate, setPremiumGate] = useState<{ open: boolean; reason: 'likes' | 'super_likes' }>({ open: false, reason: 'likes' });
   const [refreshing, setRefreshing]   = useState(false);
@@ -859,12 +858,12 @@ export default function Discover() {
   const handleSignal = useCallback(async (card: SwipeCardType, signalType: SignalType) => {
     dismiss(card.user.id);
     try {
-      const data = await api.post<{ match: (Match & { otherUser: User }) | null; isMatch: boolean }>(
+      const data = await api.post<{ match: (Match & { otherUser: PublicUser }) | null; isMatch: boolean }>(
         '/matches/like', { receiverId: card.user.id, signalType }
       );
       if (data.isMatch && data.match) setNewMatch({ ...data.match, otherUser: card.user });
-    } catch (err: any) {
-      if (err?.status === 429) {
+    } catch (err: unknown) {
+      if (errorField(err, 'status') === 429) {
         setDismissed(prev => { const s = new Set(prev); s.delete(card.user.id); return s; });
         setPremiumGate({ open: true, reason: 'likes' });
       }
@@ -880,38 +879,12 @@ export default function Discover() {
   const card = visibleCards[clampedIndex];
   const hasMore = visibleCards.length > 0;
 
-  // Matches the sidebar's brand-block height (px-6 py-5 + "CheckMate" +
-  // subtitle) so the content header and sidebar top read as one aligned
-  // strip instead of two independently-sized rows.
+  // Vertical rhythm for the content header — an intentional spacing
+  // choice, independent of the shared desktop sidebar's own brand block.
   const HEADER_H = 84;
 
   return (
-    <div className="fixed inset-0 bg-[#050508] flex">
-
-      {/* ── Left Sidebar ── */}
-      <aside className="flex-none flex flex-col bg-[#0a0a0f]" style={{ width: 220 }}>
-        <div className="px-6 py-5 flex-none">
-          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
-          <p className="text-white/30 text-xs mt-0.5">Discover</p>
-        </div>
-        <nav className="flex-1 px-3 space-y-1">
-          {[
-            { to: '/home',    icon: Home,       label: 'Home' },
-            { to: '/explore', icon: Search,     label: 'Explore' },
-            { to: '/dating',  icon: Flame,      label: 'Dating' },
-            { to: '/create',  icon: PlusSquare, label: 'Create' },
-            { to: '/matches', icon: Heart,      label: 'Matches' },
-            { to: '/profile', icon: UserIcon,   label: 'Profile' },
-          ].map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to} className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
-            }>
-              <Icon className="w-5 h-5 flex-none" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
+    <div className="fixed inset-0 bg-[#050508] flex lg:pl-[220px]">
 
       {/* ── Main Content ── */}
       <div className="flex-1 relative bg-black">

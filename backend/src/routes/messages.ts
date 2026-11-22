@@ -1,126 +1,50 @@
+import { activeUserIdentityWhere } from '../lib/access';
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
-import { notifyNewMessage } from '../lib/notifications';
+import { getAccessibleMatch } from '../lib/access';
+import { sendChatMessage, ChatError } from '../lib/chat';
+import { messageSenderSelect } from '../lib/profiles';
 
 const router = express.Router();
-
-const SendMessageSchema = z.object({
-  matchId: z.string().min(1),
-  content: z.string().min(1).max(2000),
-  messageType: z.enum(['TEXT', 'IMAGE', 'GIF', 'EMOJI', 'VIDEO']).optional().default('VIDEO'),
-});
-
-// Send message
 router.post('/', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const parsed = SendMessageSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid request', details: parsed.error.flatten() });
-    }
-
-    const { matchId, content, messageType } = parsed.data;
-
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid), select: { id: true },
     });
-
-    if (!currentUser) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const match = await prisma.match.findFirst({
-      where: {
-        id: matchId,
-        OR: [{ user1Id: currentUser.id }, { user2Id: currentUser.id }],
-        isActive: true,
-      },
-    });
-
-    if (!match) {
-      return res.status(403).json({ error: 'Not authorized to send message to this match' });
-    }
-
-    const receiverId =
-      match.user1Id === currentUser.id ? match.user2Id : match.user1Id;
-
-    const message = await prisma.message.create({
-      data: {
-        matchId,
-        senderId: currentUser.id,
-        receiverId,
-        content,
-        messageType,
-      },
-      include: { sender: true },
-    });
-
-    // Fire-and-forget push to receiver
-    notifyNewMessage(
-      receiverId,
-      currentUser.firstName,
-      content,
-      matchId
-    ).catch(() => {});
-
-    res.json({ message });
+    if (!currentUser) return res.status(404).json({ error: 'User not found' });
+    const message = await sendChatMessage(currentUser.id, req.body);
+    return res.json({ message });
   } catch (error) {
-    console.error('Send message error:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    return res.status(error instanceof ChatError ? error.status : 500)
+      .json({ error: error instanceof ChatError ? error.message : 'Failed to send message' });
   }
 });
 
-// Get messages for a match (paginated, chronological)
 router.get('/:matchId', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
+    const paging = z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+      page: z.coerce.number().int().min(1).max(10000).default(1),
+    }).safeParse(req.query);
+    if (!paging.success) return res.status(400).json({ error: 'Invalid pagination' });
+    const user = await prisma.user.findUnique({
+      where: activeUserIdentityWhere(req.user!.uid), select: { id: true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
     const { matchId } = req.params;
-    const limitNum = Math.min(Number(req.query.limit ?? 50), 100);
-    const pageNum = Math.max(Number(req.query.page ?? 1), 1);
-
-    const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
-      select: { id: true },
-    });
-
-    if (!currentUser) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const match = await prisma.match.findFirst({
-      where: {
-        id: matchId,
-        OR: [{ user1Id: currentUser.id }, { user2Id: currentUser.id }],
-      },
-    });
-
-    if (!match) {
-      return res.status(403).json({ error: 'Not authorized to view messages for this match' });
-    }
-
+    if (!await getAccessibleMatch(user.id, matchId)) return res.status(403).json({ error: 'Match not found' });
     const messages = await prisma.message.findMany({
-      where: { matchId },
-      include: { sender: true },
-      orderBy: { createdAt: 'desc' },
-      skip: (pageNum - 1) * limitNum,
-      take: limitNum,
+      where: { matchId }, include: { sender: { select: messageSenderSelect } },
+      orderBy: { createdAt: 'desc' }, skip: (paging.data.page - 1) * paging.data.limit, take: paging.data.limit,
     });
-
-    // Mark incoming messages as read
     await prisma.message.updateMany({
-      where: {
-        matchId,
-        senderId: { not: currentUser.id },
-        isRead: false,
-      },
-      data: { isRead: true },
+      where: { matchId, receiverId: user.id, isRead: false }, data: { isRead: true },
     });
-
-    res.json({ messages: messages.reverse() });
-  } catch (error) {
-    console.error('Get messages error:', error);
-    res.status(500).json({ error: 'Failed to get messages' });
+    return res.json({ messages: messages.reverse() });
+  } catch {
+    return res.status(500).json({ error: 'Failed to get messages' });
   }
 });
-
 export default router;

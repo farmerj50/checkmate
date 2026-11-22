@@ -8,7 +8,6 @@ import type {
   CreatePostInput,
   CreateReplyInput,
   Page,
-  ReportInput,
   SocialPost,
 } from './types';
 
@@ -56,6 +55,13 @@ export class MockSocialService implements SocialService {
     return delay(paginate(sorted, cursor));
   }
 
+  async getSavedPosts(cursor?: string): Promise<Page<SocialPost>> {
+    const sorted = this.allPosts()
+      .filter((p) => p.isSaved)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return delay(paginate(sorted, cursor));
+  }
+
   async getPost(postId: string): Promise<SocialPost | null> {
     return delay(this.allPosts().find((p) => p.id === postId) ?? null);
   }
@@ -78,6 +84,8 @@ export class MockSocialService implements SocialService {
       reactionCount: 0,
       reactions: {},
       viewerReactions: [],
+      saveCount: 0,
+      isSaved: false,
       createdAt: new Date().toISOString(),
     };
     if (post.parentPostId) {
@@ -124,6 +132,24 @@ export class MockSocialService implements SocialService {
     return delay(post);
   }
 
+  async savePost(postId: string): Promise<SocialPost> {
+    const post = this.findMutablePost(postId);
+    if (!post.isSaved) {
+      post.isSaved = true;
+      post.saveCount += 1;
+    }
+    return delay(post);
+  }
+
+  async unsavePost(postId: string): Promise<SocialPost> {
+    const post = this.findMutablePost(postId);
+    if (post.isSaved) {
+      post.isSaved = false;
+      post.saveCount = Math.max(0, post.saveCount - 1);
+    }
+    return delay(post);
+  }
+
   async getFollowStatus(userId: string): Promise<FollowStatus> {
     return delay(this.follows[userId] ?? { isFollowing: false, followerCount: 0, followingCount: 0 });
   }
@@ -142,15 +168,15 @@ export class MockSocialService implements SocialService {
     return delay(next);
   }
 
-  async report(_input: ReportInput): Promise<void> {
+  async report(): Promise<void> {
     return delay(undefined);
   }
 
-  async block(_userId: string): Promise<void> {
+  async block(): Promise<void> {
     return delay(undefined);
   }
 
-  async unblock(_userId: string): Promise<void> {
+  async unblock(): Promise<void> {
     return delay(undefined);
   }
 

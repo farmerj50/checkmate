@@ -1,12 +1,12 @@
+import { errorMessage } from '../utils/errors';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Video, MoreVertical, CheckCheck, Check, Flag, Ban, Play, X, User } from 'lucide-react';
 import { formatDistanceToNow, format, isToday, isYesterday } from 'date-fns';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
-import { auth } from '../lib/firebase';
+import { useAuth } from '../contexts/auth';
+import { api, getAccessToken } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import ReportModal from '../components/ReportModal';
 import type { Message, Match, User as UserType } from '../types';
@@ -171,17 +171,14 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const getAuthToken = async () =>
-    localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
-
   const sendVideo = useCallback(async (file: File) => {
-    if (!matchId || uploading) return;
+    if (!matchId || uploading || !dbUser) return;
     setUploading(true);
 
     try {
       const formData = new FormData();
       formData.append('video', file);
-      const token = await getAuthToken();
+      const token = await getAccessToken();
       const uploadRes = await fetch('/api/upload/video-message', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -201,7 +198,7 @@ export default function Chat() {
         messageType: 'VIDEO',
         isRead: false,
         createdAt: new Date().toISOString(),
-        sender: dbUser as any,
+        sender: dbUser,
       };
       setMessages((prev) => [...prev, optimistic]);
 
@@ -214,8 +211,8 @@ export default function Chat() {
       setMessages((prev) =>
         prev.map((m) => (m.id === optimistic.id ? data.message : m))
       );
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to send video');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to send video'));
       setMessages((prev) => prev.filter((m) => !m.id.startsWith('optimistic-')));
     } finally {
       setUploading(false);

@@ -1,14 +1,12 @@
+import './lib/env';
 import { createServer } from 'http';
 import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import { Server as SocketServer } from 'socket.io';
 import { prisma } from './lib/prisma';
 import { initSocket } from './socket/chat';
-
-dotenv.config({ path: '.env.dev' }); // Railway injects real env vars; this is a local dev fallback only
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';

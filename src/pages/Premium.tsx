@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/errors';
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -6,7 +7,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import Button from '../components/ui/Button';
 
 interface PremiumStatus {
@@ -15,7 +16,7 @@ interface PremiumStatus {
   boostedUntil: string | null;
   hasSubscription: boolean;
   likesToday: number;
-  likesRemaining: number;
+  likesRemaining: number | null;
   stripeEnabled: boolean;
 }
 
@@ -54,7 +55,7 @@ export default function Premium() {
     } else if (searchParams.get('canceled') === 'true') {
       toast('Checkout canceled.', { icon: 'ℹ️' });
     }
-  }, [searchParams]);
+  }, [searchParams, refreshDbUser]);
 
   async function handleCheckout() {
     setCheckoutLoading(true);
@@ -65,8 +66,8 @@ export default function Premium() {
       } else {
         toast.error(data.error ?? 'Could not start checkout');
       }
-    } catch (err: any) {
-      toast.error(err.message ?? 'Checkout failed');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Checkout failed'));
     } finally {
       setCheckoutLoading(false);
     }
@@ -80,15 +81,15 @@ export default function Premium() {
       toast.success('Subscription will cancel at end of billing period');
       const updated = await api.get<PremiumStatus>('/premium/status');
       setStatus(updated);
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to cancel');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to cancel'));
     } finally {
       setCancelLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 pb-24">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-rose-50 pb-24 lg:pl-[220px]">
       {/* Header */}
       <div className="sticky top-0 bg-white/80 backdrop-blur-sm border-b border-gray-100 z-10">
         <div className="px-4 py-4 flex items-center gap-3">

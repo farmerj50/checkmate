@@ -1,20 +1,22 @@
 import { io, Socket } from 'socket.io-client';
-import { auth } from './firebase';
+import { getAccessToken } from './api';
 
 let socket: Socket | null = null;
 
 export async function getSocket(): Promise<Socket> {
-  if (socket?.connected) return socket;
-
-  const user = auth.currentUser;
-  const token = user ? await user.getIdToken() : 'demo_user';
+  if (socket) {
+    if (!socket.connected) socket.connect();
+    return socket;
+  }
 
   const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
   const socketOrigin = apiUrl ? apiUrl.replace(/\/api$/, '') : '/';
 
   socket = io(socketOrigin, {
     path: '/socket.io',
-    auth: { token },
+    auth: callback => {
+      getAccessToken().then(token => callback({ token })).catch(() => callback({ token: null }));
+    },
     transports: ['websocket', 'polling'],
     autoConnect: true,
   });

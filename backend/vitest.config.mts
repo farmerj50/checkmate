@@ -4,9 +4,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['tests/**/*.test.ts'],
+    // Database-backed suites retain their existing environment setup.
+    // Isolated unit suites use vitest.unit.config.mts through npm test.
+    include: ['tests/**/*.e2e.test.ts'],
     setupFiles: ['tests/setup.env.ts'],
-    threads: false,
+    pool: 'forks',
     fileParallelism: false,
     isolate: true,
     coverage: {

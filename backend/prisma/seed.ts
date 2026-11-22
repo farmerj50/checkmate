@@ -20,7 +20,7 @@ const TEST_USERS = [
   // ── 1. Sofia — RELATIONSHIP, Female, 27, verified, 1 video ──────────────────
   {
     firebaseUid: 'test_user_1',
-    email: 'sofia@checkmate.test',
+    email: 'sofia@vipi.test',
     firstName: 'Sofia',
     lastName: 'Marchetti',
     dateOfBirth: new Date('1997-03-14'),
@@ -48,7 +48,7 @@ const TEST_USERS = [
   // ── 2. James — RELATIONSHIP, Male, 31, verified, 1 video ────────────────────
   {
     firebaseUid: 'test_user_2',
-    email: 'james@checkmate.test',
+    email: 'james@vipi.test',
     firstName: 'James',
     lastName: 'Okafor',
     dateOfBirth: new Date('1993-07-22'),
@@ -76,7 +76,7 @@ const TEST_USERS = [
   // ── 3. Luna — CASUAL, Female, 25, unverified, 1 video ───────────────────────
   {
     firebaseUid: 'test_user_3',
-    email: 'luna@checkmate.test',
+    email: 'luna@vipi.test',
     firstName: 'Luna',
     lastName: 'Reyes',
     dateOfBirth: new Date('1999-11-05'),
@@ -104,7 +104,7 @@ const TEST_USERS = [
   // ── 4. Marcus — RELATIONSHIP, Male, 33, verified, 1 video ───────────────────
   {
     firebaseUid: 'test_user_4',
-    email: 'marcus@checkmate.test',
+    email: 'marcus@vipi.test',
     firstName: 'Marcus',
     lastName: 'Chen',
     dateOfBirth: new Date('1991-02-18'),
@@ -132,7 +132,7 @@ const TEST_USERS = [
   // ── 5. Priya — RELATIONSHIP, Female, 26, verified, 2 videos (tests library) ─
   {
     firebaseUid: 'test_user_5',
-    email: 'priya@checkmate.test',
+    email: 'priya@vipi.test',
     firstName: 'Priya',
     lastName: 'Sharma',
     dateOfBirth: new Date('1998-08-29'),
@@ -159,7 +159,7 @@ const TEST_USERS = [
   // ── 6. Derek — FRIENDSHIP, Male, 38, unverified, NO VIDEO (edge case) ────────
   {
     firebaseUid: 'test_user_6',
-    email: 'derek@checkmate.test',
+    email: 'derek@vipi.test',
     firstName: 'Derek',
     lastName: 'Foster',
     dateOfBirth: new Date('1986-01-11'),
@@ -186,7 +186,7 @@ const TEST_USERS = [
   // ── 7. Sam — NETWORKING, Non-binary, 31, verified, 1 video ──────────────────
   {
     firebaseUid: 'test_user_7',
-    email: 'sam@checkmate.test',
+    email: 'sam@vipi.test',
     firstName: 'Sam',
     lastName: 'Rivera',
     dateOfBirth: new Date('1993-05-03'),
@@ -213,7 +213,7 @@ const TEST_USERS = [
   // ── 8. Aisha — CASUAL, Female, 27, verified, 2 videos (2nd is active) ────────
   {
     firebaseUid: 'test_user_8',
-    email: 'aisha@checkmate.test',
+    email: 'aisha@vipi.test',
     firstName: 'Aisha',
     lastName: 'Williams',
     dateOfBirth: new Date('1997-12-17'),
@@ -240,7 +240,7 @@ const TEST_USERS = [
   // ── 9. Tyler — CASUAL, Male, 25, unverified, 1 video ────────────────────────
   {
     firebaseUid: 'test_user_9',
-    email: 'tyler@checkmate.test',
+    email: 'tyler@vipi.test',
     firstName: 'Tyler',
     lastName: 'Brooks',
     dateOfBirth: new Date('1999-04-06'),
@@ -267,7 +267,7 @@ const TEST_USERS = [
   // ── 10. Naomi — NETWORKING, Female, 33, premium + verified, 1 video ──────────
   {
     firebaseUid: 'test_user_10',
-    email: 'naomi@checkmate.test',
+    email: 'naomi@vipi.test',
     firstName: 'Naomi',
     lastName: 'Park',
     dateOfBirth: new Date('1991-09-24'),
@@ -294,7 +294,7 @@ const TEST_USERS = [
   // ── 11. Carlos — RELATIONSHIP, Male, 29, verified, 1 video ──────────────────
   {
     firebaseUid: 'test_user_11',
-    email: 'carlos@checkmate.test',
+    email: 'carlos@vipi.test',
     firstName: 'Carlos',
     lastName: 'Mendez',
     dateOfBirth: new Date('1995-06-12'),
@@ -321,7 +321,7 @@ const TEST_USERS = [
   // ── 12. Zoey — CASUAL, Female, 22, unverified, NO video, minimal bio ─────────
   {
     firebaseUid: 'test_user_12',
-    email: 'zoey@checkmate.test',
+    email: 'zoey@vipi.test',
     firstName: 'Zoey',
     lastName: 'Hart',
     dateOfBirth: new Date('2002-02-14'),
@@ -348,7 +348,7 @@ const TEST_USERS = [
   // ── 13. David — FRIENDSHIP, Male, 35, verified, 1 video ─────────────────────
   {
     firebaseUid: 'test_user_13',
-    email: 'david@checkmate.test',
+    email: 'david@vipi.test',
     firstName: 'David',
     lastName: 'Kim',
     dateOfBirth: new Date('1989-10-30'),
@@ -375,7 +375,7 @@ const TEST_USERS = [
   // ── 14. Isabelle — RELATIONSHIP, Female, 28, premium + verified, 3 videos ───
   {
     firebaseUid: 'test_user_14',
-    email: 'isabelle@checkmate.test',
+    email: 'isabelle@vipi.test',
     firstName: 'Isabelle',
     lastName: 'Dupont',
     dateOfBirth: new Date('1996-07-08'),
@@ -402,7 +402,7 @@ const TEST_USERS = [
   // ── 15. Malik — RELATIONSHIP, Male, 32, verified, 1 video ───────────────────
   {
     firebaseUid: 'test_user_15',
-    email: 'malik@checkmate.test',
+    email: 'malik@vipi.test',
     firstName: 'Malik',
     lastName: 'Johnson',
     dateOfBirth: new Date('1992-03-22'),
@@ -429,7 +429,7 @@ const TEST_USERS = [
   // ── 16. Reina — CASUAL, Female, 25, verified, 2 videos ──────────────────────
   {
     firebaseUid: 'test_user_16',
-    email: 'reina@checkmate.test',
+    email: 'reina@vipi.test',
     firstName: 'Reina',
     lastName: 'Nakamura',
     dateOfBirth: new Date('1999-01-19'),
@@ -457,7 +457,7 @@ const TEST_USERS = [
 // ── Demo user ─────────────────────────────────────────────────────────────────
 const DEMO_USER = {
   firebaseUid: 'demo_user',
-  email: 'demo@checkmate.app',
+  email: 'demo@vipi.app',
   firstName: 'Alex',
   lastName: 'Demo',
   dateOfBirth: new Date('1995-06-15'),

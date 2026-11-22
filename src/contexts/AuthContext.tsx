@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { useCallback, useEffect, useState, ReactNode } from 'react';
 import {
   User as FirebaseUser,
   signInWithEmailAndPassword,
@@ -11,15 +11,36 @@ import {
 } from 'firebase/auth';
 import { auth, isDemoMode } from '../lib/firebase';
 import { api } from '../lib/api';
+import { disconnectSocket } from '../lib/socket';
 import type { User } from '../types';
+import { AuthContext } from './auth';
 
 // Minimal fake FirebaseUser for demo mode — the app only reads .uid and .email
-const DEMO_FIREBASE_USER = {
-  uid: 'demo_user',
-  email: 'demo@checkmate.app',
-  displayName: 'Demo User',
-  getIdToken: async () => 'demo_user',
-} as unknown as FirebaseUser;
+const DEMO_TOKEN_KEY = 'demo_token';
+const DEMO_EMAIL_KEY = 'demo_email';
+
+function normalizeDemoEmail(email?: string | null) {
+  return email?.trim().toLowerCase() || 'demo@vipi.app';
+}
+
+function demoUidForEmail(email?: string | null) {
+  const normalized = normalizeDemoEmail(email);
+  const slug = normalized
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+  return `demo_${slug || 'user'}`;
+}
+
+function makeDemoFirebaseUser(token: string, email?: string | null) {
+  const normalizedEmail = normalizeDemoEmail(email);
+  return {
+    uid: token,
+    email: normalizedEmail,
+    displayName: normalizedEmail.split('@')[0] || 'Demo User',
+    getIdToken: async () => token,
+  } as unknown as FirebaseUser;
+}
 
 // Register FCM token after login — fire-and-forget
 async function registerFcmToken() {
@@ -38,45 +59,58 @@ async function registerFcmToken() {
   }
 }
 
-interface AuthContextValue {
-  firebaseUser: FirebaseUser | null;
-  dbUser: User | null;
-  loading: boolean;
-  needsOnboarding: boolean;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-  refreshDbUser: () => Promise<void>;
-  /** Call after onboarding registration succeeds — sets dbUser immediately so
-   *  PrivateRoute sees it before navigation, avoiding the redirect-to-onboarding race. */
-  completeOnboarding: (user: User) => void;
-}
 
-const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [dbUser, setDbUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchDbUser = async () => {
-    try {
-      const data = await api.get<{ user: User | null }>('/auth/me');
-      setDbUser(data.user);
-    } catch {
-      setDbUser(null);
+  const fetchDbUser = useCallback(async () => {
+    const data = await api.get<{ user: User | null }>('/auth/me');
+    setDbUser(data.user);
+    return data.user;
+  }, []);
+
+  const clearDemoSession = () => {
+    disconnectSocket();
+    localStorage.removeItem(DEMO_TOKEN_KEY);
+    localStorage.removeItem(DEMO_EMAIL_KEY);
+    setFirebaseUser(null);
+    setDbUser(null);
+  };
+
+  const startDemoSession = (email?: string | null) => {
+    const normalizedEmail = normalizeDemoEmail(email);
+    const token = demoUidForEmail(normalizedEmail);
+    localStorage.setItem(DEMO_TOKEN_KEY, token);
+    localStorage.setItem(DEMO_EMAIL_KEY, normalizedEmail);
+    const demoUser = makeDemoFirebaseUser(token, normalizedEmail);
+    setFirebaseUser(demoUser);
+    return demoUser;
+  };
+
+  const requireExistingProfile = (user: User | null) => {
+    if (!user) {
+      throw Object.assign(new Error('No Vipi profile found for this account. Create an account first.'), {
+        code: 'auth/no-profile',
+      });
     }
+    return user;
   };
 
   useEffect(() => {
     if (isDemoMode) {
       // Demo mode: restore session from localStorage, skip Firebase listener
-      const token = localStorage.getItem('demo_token');
+      const token = localStorage.getItem(DEMO_TOKEN_KEY);
       if (token) {
-        setFirebaseUser(DEMO_FIREBASE_USER);
-        fetchDbUser().finally(() => setLoading(false));
+        setFirebaseUser(makeDemoFirebaseUser(token, localStorage.getItem(DEMO_EMAIL_KEY)));
+        fetchDbUser()
+          .then((user) => setDbUser(user))
+          .catch(() => {
+            setDbUser(null);
+          })
+          .finally(() => setLoading(false));
       } else {
         setLoading(false);
       }
@@ -86,31 +120,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        await fetchDbUser();
-        registerFcmToken();
+        try {
+          await fetchDbUser();
+          registerFcmToken();
+        } catch {
+          await signOut(auth).catch(() => null);
+          setFirebaseUser(null);
+          setDbUser(null);
+        }
       } else {
+        disconnectSocket();
         setDbUser(null);
       }
       setLoading(false);
     });
     return unsubscribe;
-  }, []);
+  }, [fetchDbUser]);
 
   const signInWithEmail = async (email: string, password: string) => {
     if (isDemoMode) {
-      localStorage.setItem('demo_token', 'demo_user');
-      setFirebaseUser(DEMO_FIREBASE_USER);
-      await fetchDbUser();
-      return;
+      startDemoSession(email);
+      try {
+        return requireExistingProfile(await fetchDbUser());
+      } catch (err) {
+        if ((err as { code?: string })?.code !== 'auth/no-profile') {
+          clearDemoSession();
+        }
+        throw err;
+      }
     }
     await signInWithEmailAndPassword(auth, email, password);
-    await fetchDbUser();
+    try {
+      return requireExistingProfile(await fetchDbUser());
+    } catch (err) {
+      if ((err as { code?: string })?.code !== 'auth/no-profile') {
+        await signOut(auth).catch(() => null);
+        setFirebaseUser(null);
+        setDbUser(null);
+      }
+      throw err;
+    }
   };
 
   const signUpWithEmail = async (email: string, password: string) => {
     if (isDemoMode) {
-      localStorage.setItem('demo_token', 'demo_user');
-      setFirebaseUser(DEMO_FIREBASE_USER);
+      startDemoSession(email);
       setDbUser(null); // triggers onboarding
       return;
     }
@@ -118,26 +172,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setDbUser(null);
   };
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (intent: 'login' | 'signup' = 'login', emailHint?: string) => {
     if (isDemoMode) {
-      localStorage.setItem('demo_token', 'demo_user');
-      setFirebaseUser(DEMO_FIREBASE_USER);
-      await fetchDbUser();
-      return;
+      startDemoSession(emailHint || localStorage.getItem(DEMO_EMAIL_KEY) || 'google@vipi.demo');
+      try {
+        const user = await fetchDbUser();
+        if (intent === 'login') requireExistingProfile(user);
+        return user;
+      } catch (err) {
+        if ((err as { code?: string })?.code !== 'auth/no-profile') {
+          clearDemoSession();
+        }
+        throw err;
+      }
     }
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
-    await fetchDbUser();
+    const credential = await signInWithPopup(auth, provider);
+    setFirebaseUser(credential.user);
+    try {
+      const user = await fetchDbUser();
+      if (intent === 'login') requireExistingProfile(user);
+      return user;
+    } catch (err) {
+      if ((err as { code?: string })?.code !== 'auth/no-profile') {
+        await signOut(auth).catch(() => null);
+        setFirebaseUser(null);
+        setDbUser(null);
+      }
+      throw err;
+    }
   };
 
   const logout = async () => {
+    disconnectSocket();
     if (isDemoMode) {
-      localStorage.removeItem('demo_token');
+      clearDemoSession();
     } else {
       await signOut(auth);
+      setFirebaseUser(null);
+      setDbUser(null);
     }
-    setFirebaseUser(null);
-    setDbUser(null);
   };
 
   const resetPassword = async (email: string) => {
@@ -148,9 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, email);
   };
 
-  const refreshDbUser = async () => {
-    await fetchDbUser();
-  };
+  const refreshDbUser = fetchDbUser;
 
   const completeOnboarding = (user: User) => {
     setDbUser(user);
@@ -178,10 +250,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

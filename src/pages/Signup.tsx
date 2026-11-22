@@ -1,10 +1,12 @@
+import { errorMessage, errorField } from '../utils/errors';
 import { useState, KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Heart, ArrowRight, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { isDemoMode } from '../lib/firebase';
+import { isSignupEmail } from '../utils/onboarding';
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -18,21 +20,21 @@ export default function Signup() {
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleSubmit = async () => {
-    if (!email.trim()) { toast.error('Enter your email'); return; }
+    if (!isSignupEmail(email)) { toast.error('Enter a valid email address'); return; }
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     if (!isDemoMode && password !== confirm) { toast.error('Passwords do not match'); return; }
     setLoading(true);
     try {
       await signUpWithEmail(email.trim(), password);
       navigate('/onboarding');
-    } catch (err: any) {
-      const code = err.code ?? '';
+    } catch (err: unknown) {
+      const code = errorField(err, 'code') ?? '';
       toast.error(
         code === 'auth/email-already-in-use'
           ? 'An account with this email already exists.'
           : code === 'auth/weak-password'
           ? 'Password must be at least 6 characters.'
-          : err.message ?? 'Sign up failed.'
+          : errorMessage(err, 'Sign up failed.')
       );
     } finally {
       setLoading(false);
@@ -40,12 +42,16 @@ export default function Signup() {
   };
 
   const handleGoogle = async () => {
+    if (isDemoMode && email.trim() && !isSignupEmail(email)) {
+      toast.error('Enter a valid email address');
+      return;
+    }
     setGoogleLoading(true);
     try {
-      await signInWithGoogle();
-      navigate('/onboarding');
-    } catch {
-      toast.error('Google sign in failed.');
+      const user = await signInWithGoogle('signup', email.trim() || undefined);
+      navigate(user ? '/home' : '/onboarding');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Google sign in failed.'));
     } finally {
       setGoogleLoading(false);
     }
@@ -75,7 +81,7 @@ export default function Signup() {
             <div className="w-10 h-10 rounded-2xl bg-pink-600 grid place-items-center shadow-lg shadow-pink-600/40">
               <Heart className="w-5 h-5 text-white" />
             </div>
-            <span className="text-white text-xl font-semibold tracking-tight">CheckMate</span>
+            <span className="text-white text-xl font-semibold tracking-tight">Vipi</span>
           </div>
         </div>
 
@@ -84,7 +90,7 @@ export default function Signup() {
 
         {isDemoMode && (
           <div className="mb-8 bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-3 text-amber-300/80 text-xs">
-            <strong className="text-amber-300">Demo mode</strong> — any email &amp; password will work.
+            <strong className="text-amber-300">Demo mode</strong> — use a valid email address and any password with at least 6 characters.
           </div>
         )}
 

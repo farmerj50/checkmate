@@ -32,7 +32,7 @@ export interface UserPreference {
   userId: string;
   dealBreakers: string[];
   mustHaves: string[];
-  lifestylePreferences?: any;
+  lifestylePreferences?: Record<string, unknown>;
   showAge: boolean;
   showDistance: boolean;
   showLastActive: boolean;
@@ -42,14 +42,22 @@ export interface UserPreference {
   messageNotifications: boolean;
 }
 
+export type PublicUser = Pick<User, 'id' | 'firstName' | 'lastName' | 'gender' | 'bio' |
+  'occupation' | 'education' | 'height' | 'profilePictures' | 'profileVideos' | 'profileVideo' |
+  'interests' | 'lookingFor' | 'isVerified'> & {
+  age: number | null;
+  location: string | null;
+  lastActive: string | null;
+};
+
 export interface Match {
   id: string;
   user1Id: string;
   user2Id: string;
   createdAt: string;
   isActive: boolean;
-  user1: User;
-  user2: User;
+  user1: PublicUser;
+  user2: PublicUser;
   lastMessage?: Message;
 }
 
@@ -61,7 +69,7 @@ export interface Message {
   messageType: 'TEXT' | 'IMAGE' | 'GIF' | 'EMOJI' | 'VIDEO';
   isRead: boolean;
   createdAt: string;
-  sender: User;
+  sender: Pick<User, 'id' | 'firstName' | 'profilePictures' | 'isVerified'>;
 }
 
 export interface Like {
@@ -80,8 +88,8 @@ export interface UserPrompt { question: string; answer: string; }
 export interface DailyPrompt { id: string; question: string; category: string; responseCount?: number; }
 
 export interface SwipeCard {
-  user: User;
-  distance: number;
+  user: PublicUser;
+  distance: number | null;
   compatibilityScore: number;
   commonInterests: string[];
   scoreBreakdown?: {

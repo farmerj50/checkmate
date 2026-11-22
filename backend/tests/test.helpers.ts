@@ -11,15 +11,44 @@ export function authHeader(token: string) {
 }
 
 export async function resetDb() {
-  await prisma.postReaction.deleteMany();
-  await prisma.post.deleteMany();
-  await prisma.follow.deleteMany();
-  await prisma.block.deleteMany();
-  await prisma.report.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.userPrompt.deleteMany().catch(() => null);
-  await prisma.profileView.deleteMany().catch(() => null);
-  await prisma.user.deleteMany();
+  const database = new URL(process.env.TEST_DATABASE_URL ?? 'file:missing');
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(database.hostname) ||
+      !database.pathname.toLowerCase().includes('test') || process.env.DATABASE_URL !== process.env.TEST_DATABASE_URL) {
+    throw new Error('Fixture cleanup requires an explicitly configured local test database');
+  }
+  const testUsers = await prisma.user.findMany({
+    where: { firebaseUid: { in: [A, B, C] } },
+    select: { id: true },
+  });
+  const testUserIds = testUsers.map((user) => user.id);
+
+  if (testUserIds.length > 0) {
+    await prisma.savedPost.deleteMany({
+      where: { OR: [{ userId: { in: testUserIds } }, { post: { authorId: { in: testUserIds } } }] },
+    }).catch(() => null);
+    await prisma.postReaction.deleteMany({
+      where: { OR: [{ userId: { in: testUserIds } }, { post: { authorId: { in: testUserIds } } }] },
+    });
+    await prisma.follow.deleteMany({
+      where: { OR: [{ followerId: { in: testUserIds } }, { followingId: { in: testUserIds } }] },
+    });
+    await prisma.block.deleteMany({
+      where: { OR: [{ blockerId: { in: testUserIds } }, { blockedId: { in: testUserIds } }] },
+    });
+    await prisma.report.deleteMany({
+      where: { OR: [{ reporterId: { in: testUserIds } }, { reportedId: { in: testUserIds } }] },
+    });
+    await prisma.notification.deleteMany({
+      where: { OR: [{ userId: { in: testUserIds } }, { actorId: { in: testUserIds } }] },
+    });
+    await prisma.userPrompt.deleteMany({ where: { userId: { in: testUserIds } } }).catch(() => null);
+    await prisma.profileView.deleteMany({
+      where: { OR: [{ viewerId: { in: testUserIds } }, { viewedId: { in: testUserIds } }] },
+    }).catch(() => null);
+    await prisma.post.deleteMany({ where: { authorId: { in: testUserIds } } });
+  }
+
+  await prisma.user.deleteMany({ where: { firebaseUid: { in: [A, B, C] } } });
 }
 
 export async function createUser(token: string, name: string) {

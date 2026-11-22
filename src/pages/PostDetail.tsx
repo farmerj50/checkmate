@@ -7,6 +7,7 @@ import { normalizeAssetUrl } from '../utils/helpers';
 import AsyncState from '../components/ui/AsyncState';
 import ReactionBar from '../components/social/ReactionBar';
 import ReplyRecorderModal from '../components/social/ReplyRecorderModal';
+import SaveButton from '../components/social/SaveButton';
 
 export default function PostDetail() {
   const { postId } = useParams<{ postId: string }>();
@@ -82,6 +83,7 @@ export default function PostDetail() {
             {/* Actions */}
             <div className="flex items-center gap-5 px-4 py-3 border-b border-white/5">
               <ReactionBar post={post} onChange={handlePostChange} variant="inline" />
+              <SaveButton post={post} onChange={handlePostChange} variant="inline" />
               <button onClick={() => setRecorderOpen(true)} className="flex items-center gap-1.5">
                 <Video className="w-5 h-5 text-white/70" />
                 <span className="text-white/60 text-sm">{replies.length > 0 ? replies.length : 'Reply'}</span>
@@ -137,7 +139,10 @@ function ReplyCard({ reply, onChange }: { reply: SocialPost; onChange: (r: Socia
           <video src={media ?? ''} className="w-full h-full object-cover" muted loop playsInline controls />
         </div>
         <div className="mt-1.5">
-          <ReactionBar post={reply} onChange={onChange} variant="inline" />
+          <div className="flex items-center gap-4">
+            <ReactionBar post={reply} onChange={onChange} variant="inline" />
+            <SaveButton post={reply} onChange={onChange} variant="inline" />
+          </div>
         </div>
       </div>
     </div>

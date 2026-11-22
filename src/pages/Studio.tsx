@@ -1,19 +1,19 @@
+import { errorMessage } from '../utils/errors';
 /**
  * 🎬 STUDIO — Video upload + AI content creation assistant
  * Layout: Left sidebar | Center tabs (Video / Script) | Right AI panel
  * Video-only for v0.1 — Codex's finalized Post contract has no image-post path.
  */
 import { useState, useRef, useCallback } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Home, Search, PlusSquare, Heart, Bell, Upload, Sparkles,
-  Send, Loader2, X, Video, Film, Wand2, Hash, FileText,
-  Image as ImageIcon, Zap, Check, User,
+  Upload, Sparkles,
+  Send, Loader2, X, Video, Wand2, Hash, FileText,
+  Image as ImageIcon, Zap, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
-import { auth } from '../lib/firebase';
+import { api, getAccessToken } from '../lib/api';
 import { socialService } from '../services/social';
 
 interface ChatMessage {
@@ -25,12 +25,12 @@ interface ChatMessage {
 type CenterTab = 'video' | 'script';
 
 const QUICK_PROMPTS = [
-  { icon: Sparkles,  label: 'Create concept', msg: 'Create a complete video concept for my CheckMate dating profile video. Include: a powerful hook for the first 3 seconds, main content idea, and CTA. Make it authentic and engaging.' },
+  { icon: Sparkles,  label: 'Create concept', msg: 'Create a complete video concept for my Vipi dating profile video. Include: a powerful hook for the first 3 seconds, main content idea, and CTA. Make it authentic and engaging.' },
   { icon: FileText,  label: 'Write script',   msg: 'Write a complete 30-second video script with timing marks (e.g. [0-3s]), dialogue or voiceover text, and visual directions for each segment.' },
   { icon: ImageIcon, label: 'Picture ideas',  msg: 'Suggest 6 specific photo or B-roll scene ideas I should capture to complement my video. Be specific about angles, lighting, and what to show.' },
   { icon: Zap,       label: 'Improve it',     msg: 'Analyze my current content and caption, then give me 5 specific, actionable improvements I can make right now to get more engagement.' },
   { icon: Wand2,     label: 'Hook ideas',     msg: 'Give me 5 powerful hook ideas for the first 3 seconds of my video to stop the scroll and make people want to keep watching.' },
-  { icon: Hash,      label: 'Hashtags',       msg: 'Suggest 10 relevant hashtags for my CheckMate dating profile video that will maximize reach.' },
+  { icon: Hash,      label: 'Hashtags',       msg: 'Suggest 10 relevant hashtags for my Vipi dating profile video that will maximize reach.' },
 ];
 
 function isScriptLike(text: string): boolean {
@@ -121,7 +121,7 @@ export default function Studio() {
     if (!videoFile) return;
     setUploading(true);
     try {
-      const token = localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
+      const token = (await getAccessToken()) ?? '';
       const formData = new FormData();
       // Field name must be 'media' — matches postMediaUpload.single('media')
       // in backend/src/routes/upload.ts. Pre-existing bug fixed in passing:
@@ -142,8 +142,8 @@ export default function Studio() {
       });
       toast.success('Published!');
       navigate('/home');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to publish');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to publish'));
     } finally {
       setUploading(false);
     }
@@ -157,39 +157,7 @@ export default function Studio() {
   ];
 
   return (
-    <div className="fixed inset-0 bg-[#050508] flex">
-
-      {/* ── LEFT SIDEBAR ── */}
-      <aside className="flex-none flex flex-col bg-[#0a0a0f]" style={{ width: 220 }}>
-        <div className="px-6 py-5 flex-none">
-          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
-          <p className="text-white/30 text-xs mt-0.5">Studio</p>
-        </div>
-        <nav className="flex-1 px-3 space-y-1">
-          {[
-            { to: '/home',          icon: Home,       label: 'Home' },
-            { to: '/explore',       icon: Search,     label: 'Explore' },
-            { to: '/create',        icon: PlusSquare, label: 'Quick Post' },
-            { to: '/studio',        icon: Film,       label: 'Studio' },
-            { to: '/matches',       icon: Heart,      label: 'Matches' },
-            { to: '/notifications', icon: Bell,       label: 'Alerts' },
-            { to: '/profile',       icon: User,       label: 'Profile' },
-          ].map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to} className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
-            }>
-              <Icon className="w-5 h-5 flex-none" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="px-4 py-5 flex-none">
-          <div className="rounded-xl bg-gradient-to-br from-[#ff4d8d]/10 to-[#8b5cf6]/10 border border-white/8 p-3">
-            <p className="text-white/50 text-[10px] uppercase tracking-widest mb-1">AI Powered</p>
-            <p className="text-white/70 text-xs leading-snug">Create scripts, concepts, and visual ideas with your AI assistant.</p>
-          </div>
-        </div>
-      </aside>
+    <div className="fixed inset-0 bg-[#050508] flex lg:pl-[220px]">
 
       {/* ── CENTER ── */}
       <div className="flex-1 flex flex-col overflow-hidden border-r border-white/6">
@@ -230,6 +198,15 @@ export default function Studio() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* AI-assist blurb — was in the page's own sidebar, now that the
+            sidebar is shared/global this lives inline in Studio itself. */}
+        <div className="px-8 pt-4 flex-none">
+          <div className="rounded-xl bg-gradient-to-br from-[#ff4d8d]/10 to-[#8b5cf6]/10 border border-white/8 px-4 py-3 flex items-center gap-3">
+            <span className="text-white/50 text-[10px] uppercase tracking-widest flex-none">AI Powered</span>
+            <p className="text-white/70 text-xs leading-snug">Create scripts, concepts, and visual ideas with your AI assistant.</p>
+          </div>
         </div>
 
         {/* Tab content */}

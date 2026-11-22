@@ -97,7 +97,7 @@ export default function Landing() {
             <div className="w-9 h-9 rounded-2xl bg-pink-600 grid place-items-center shadow-lg shadow-pink-600/40">
               <Heart className="w-4.5 h-4.5 text-white" />
             </div>
-            <span className="text-lg font-semibold tracking-tight">CheckMate</span>
+            <span className="text-lg font-semibold tracking-tight">Vipi</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-7 text-sm text-white/60">
@@ -274,7 +274,7 @@ export default function Landing() {
       </section>
 
       <footer className="border-t border-white/8 py-8 text-center text-white/25 text-sm">
-        © {new Date().getFullYear()} CheckMate, Inc.
+        © {new Date().getFullYear()} Vipi, Inc.
       </footer>
     </div>
   );

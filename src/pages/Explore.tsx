@@ -1,11 +1,11 @@
 /**
  * 🔍 EXPLORE — TikTok desktop layout
- * Left sidebar (nav + search) | Center video feed | Right video-replies panel
- * Bottom nav is hidden on this route (Navigation.tsx returns null for /explore).
+ * Center video feed | Right video-replies panel. Nav is the shared global
+ * DesktopSidebar/Navigation (lg: sidebar, mobile: bottom nav).
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
-import { Heart, UserPlus, BadgeCheck, Loader2, Volume2, VolumeX, X, Search, Home, PlusSquare, Bell, Film, User, Video as VideoIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { UserPlus, BadgeCheck, Loader2, Volume2, VolumeX, X, Search, Video as VideoIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { normalizeAssetUrl } from '../utils/helpers';
@@ -14,6 +14,7 @@ import { useAsync } from '../hooks/useAsync';
 import AsyncState from '../components/ui/AsyncState';
 import ReactionBar from '../components/social/ReactionBar';
 import ReplyRecorderModal from '../components/social/ReplyRecorderModal';
+import SaveButton from '../components/social/SaveButton';
 
 interface DiscoverPost extends SocialPost {
   isFollowing: boolean;
@@ -81,7 +82,6 @@ export default function Explore() {
     return () => obs.disconnect();
   }, [posts.length]);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filteredPosts = query.trim()
@@ -109,65 +109,27 @@ export default function Explore() {
   const repliesPost = posts.find((p) => p.id === repliesPostId);
 
   return (
-    <div className="fixed inset-0 bg-[#050508] flex">
+    <div className="fixed inset-0 bg-[#050508] flex lg:pl-[220px]">
 
-      {/* ── LEFT SIDEBAR ── */}
-      <aside className="flex-none flex flex-col bg-[#0a0a0f] relative z-10" style={{ width: 220 }}>
-        {/* Logo */}
-        <div className="px-6 py-5 flex-none">
-          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
-        </div>
+      {/* ── CENTER: SNAP VIDEO FEED ── */}
+      <div className="flex-1 relative overflow-hidden">
 
-        {/* Rectangular search bar — clicking opens nav */}
-        <div className="px-4 pb-3 flex-none relative">
+        {/* Search — was in the page's own sidebar; now floats over the feed
+            since navigation is the shared global sidebar/bottom-nav. */}
+        <div className="absolute top-4 left-4 z-20 w-64 max-w-[calc(100%-2rem)]">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
             <input
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setSidebarOpen(true)}
-              onBlur={() => setTimeout(() => setSidebarOpen(false), 150)}
               placeholder="Search…"
               autoComplete="off"
-              className="w-full bg-white/6 border border-white/10 rounded-md pl-9 pr-3 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-[#ff4d8d]/40 [color-scheme:dark]"
+              className="w-full bg-black/50 backdrop-blur-md border border-white/10 rounded-full pl-9 pr-3 py-2 text-white text-sm placeholder-white/40 focus:outline-none focus:border-[#ff4d8d]/40 [color-scheme:dark]"
             />
           </div>
         </div>
 
-        {/* Nav links — always visible */}
-        <AnimatePresence>
-          {(sidebarOpen || !query) && (
-            <motion.nav
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.15 }}
-              className="flex-1 px-3 space-y-1"
-            >
-              {[
-                { to: '/home',          icon: Home,       label: 'Home' },
-                { to: '/explore',       icon: Search,     label: 'Explore' },
-                { to: '/create',        icon: PlusSquare, label: 'Create' },
-                { to: '/matches',       icon: Heart,      label: 'Matches' },
-                { to: '/notifications', icon: Bell,       label: 'Alerts' },
-                { to: '/studio',        icon: Film,       label: 'Studio' },
-                { to: '/profile',       icon: User,       label: 'Profile' },
-              ].map(({ to, icon: Icon, label }) => (
-                <NavLink key={to} to={to} className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
-                }>
-                  <Icon className="w-5 h-5 flex-none" />
-                  {label}
-                </NavLink>
-              ))}
-            </motion.nav>
-          )}
-        </AnimatePresence>
-      </aside>
-
-      {/* ── CENTER: SNAP VIDEO FEED ── */}
-      <div className="flex-1 relative overflow-hidden">
         <div
           ref={containerRef}
           className="h-full overflow-y-scroll"
@@ -318,6 +280,8 @@ function VideoSlide({ post, idx, isActive, muted, repliesOpen, onMuteToggle, onC
 
           <ReactionBar post={post} onChange={onChange} variant="rail" />
 
+          <SaveButton post={post} onChange={onChange} variant="rail" />
+
           <button onClick={onReply} className="flex flex-col items-center gap-1.5">
             <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${repliesOpen ? 'bg-[#ff4d8d]/20 ring-1 ring-[#ff4d8d]/40' : 'bg-white/10 hover:bg-white/20'}`}>
               <VideoIcon className={`w-5 h-5 ${repliesOpen ? 'text-[#ff4d8d]' : 'text-white'}`} />
@@ -381,7 +345,10 @@ function RepliesPanel({ postId, onClose }: { postId: string; onClose: () => void
                     <video src={media ?? ''} className="w-full h-full object-cover" muted loop playsInline controls />
                   </div>
                   <div className="mt-1.5">
-                    <ReactionBar post={r} onChange={handleChange} variant="inline" />
+                    <div className="flex items-center gap-4">
+                      <ReactionBar post={r} onChange={handleChange} variant="inline" />
+                      <SaveButton post={r} onChange={handleChange} variant="inline" />
+                    </div>
                   </div>
                 </div>
               </div>

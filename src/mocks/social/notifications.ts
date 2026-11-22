@@ -6,7 +6,7 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 60 * 60 * 1000).toISOS
 /**
  * Notification *types* here (NEW_FOLLOWER / POST_LIKED / POST_COMMENTED / NEW_MATCH)
  * match the existing, stable contract in src/types/index.ts exactly — this is real
- * CheckMate behavior being mocked, not a new shape. POST_COMMENTED stays even though
+ * Vipi behavior being mocked, not a new shape. POST_COMMENTED stays even though
  * the product direction has moved off comments, because that's what the current,
  * unmodified notification contract still defines; renaming it is Codex's call.
  */

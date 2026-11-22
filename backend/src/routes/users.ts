@@ -1,9 +1,12 @@
+import { activeUserIdentityWhere } from '../lib/access';
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { geocodeLocation } from '../lib/geocoding';
 import { haversineKm, scoreCandidate, passesFilters } from '../lib/matching';
+import { publicProfile, publicProfileSelect } from '../lib/profiles';
+import { visibleUserWhere } from '../lib/access';
 
 const router = express.Router();
 
@@ -30,7 +33,7 @@ const UpdateProfileSchema = z.object({
 const UpdatePreferencesSchema = z.object({
   dealBreakers: z.array(z.string()).optional(),
   mustHaves: z.array(z.string()).optional(),
-  lifestylePreferences: z.record(z.unknown()).optional(),
+  lifestylePreferences: z.record(z.string(), z.json()).optional(),
   showAge: z.boolean().optional(),
   showDistance: z.boolean().optional(),
   showLastActive: z.boolean().optional(),
@@ -44,7 +47,7 @@ const UpdatePreferencesSchema = z.object({
 router.get('/profile', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       include: { preferences: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -64,6 +67,13 @@ router.put('/profile', authenticateToken, async (req: AuthenticatedRequest, res)
     }
 
     const { userData } = parsed.data;
+    const existing = await prisma.user.findUnique({ where: activeUserIdentityWhere(req.user!.uid) });
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+    if (userData.profilePictures?.some(url => !existing.profilePictures.includes(url)) ||
+        userData.profileVideos?.some(url => !existing.profileVideos.includes(url)) ||
+        (userData.profileVideo && !existing.profileVideos.includes(userData.profileVideo))) {
+      return res.status(403).json({ error: 'Profile media must belong to your upload library' });
+    }
 
     // Geocode if location changed
     let geoUpdate: { lat?: number; lng?: number } = {};
@@ -73,7 +83,7 @@ router.put('/profile', authenticateToken, async (req: AuthenticatedRequest, res)
     }
 
     const user = await prisma.user.update({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       data: { ...userData, ...geoUpdate, updatedAt: new Date() },
     });
 
@@ -88,7 +98,7 @@ router.put('/profile', authenticateToken, async (req: AuthenticatedRequest, res)
 router.get('/preferences', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -112,7 +122,7 @@ router.put('/preferences', authenticateToken, async (req: AuthenticatedRequest, 
     }
 
     const dbUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!dbUser) return res.status(404).json({ error: 'User not found' });
@@ -133,7 +143,7 @@ router.put('/preferences', authenticateToken, async (req: AuthenticatedRequest, 
 router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
     });
     if (!currentUser) return res.status(404).json({ error: 'User not found' });
 
@@ -156,11 +166,11 @@ router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res
     const candidates = await prisma.user.findMany({
       where: {
         id: { notIn: excludeIds },
-        isActive: true,
+        ...visibleUserWhere(currentUser.id),
       },
       orderBy: { lastActive: 'desc' },
       take: 200,
-      include: { userPrompt: true },
+      include: { userPrompt: true, preferences: true },
     });
 
     // Score + filter candidates
@@ -207,6 +217,12 @@ router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res
     const candidateMap = new Map(candidates.map((c) => [c.id, c]));
     const final = finalScored.map((s) => ({
       ...s,
+      user: publicProfile(candidateMap.get(s.user.id)!),
+      distance: candidateMap.get(s.user.id)?.preferences?.showDistance === false ||
+        currentUser.lat == null || currentUser.lng == null ||
+        candidateMap.get(s.user.id)?.lat == null || candidateMap.get(s.user.id)?.lng == null ? null : Math.round(s.distance),
+      scoreBreakdown: undefined,
+      reason: undefined,
       prompt: candidateMap.get(s.user.id)?.userPrompt
         ? { question: candidateMap.get(s.user.id)!.userPrompt!.question, answer: candidateMap.get(s.user.id)!.userPrompt!.answer }
         : null,
@@ -223,7 +239,7 @@ router.get('/discover', authenticateToken, async (req: AuthenticatedRequest, res
 router.get('/super-likes/remaining', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, isPremium: true },
     });
     if (!currentUser) return res.status(404).json({ error: 'User not found' });
@@ -255,7 +271,7 @@ router.get('/super-likes/remaining', authenticateToken, async (req: Authenticate
 router.get('/me/prompt', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const dbUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!dbUser) return res.status(404).json({ error: 'User not found' });
@@ -275,7 +291,7 @@ router.put('/me/prompt', authenticateToken, async (req: AuthenticatedRequest, re
     }).parse(req.body);
 
     const dbUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!dbUser) return res.status(404).json({ error: 'User not found' });
@@ -312,6 +328,10 @@ router.post('/:userId/view', authenticateToken, async (req: AuthenticatedRequest
     if (viewerId === viewedId) return res.json({ ok: true }); // don't track self-views
     const currentUser = await prisma.user.findUnique({ where: { firebaseUid: viewerId }, select: { id: true } });
     if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
+    if (currentUser.id === viewedId) return res.json({ ok: true });
+    if (!await prisma.user.findFirst({ where: { id: viewedId, ...visibleUserWhere(currentUser.id) }, select: { id: true } })) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     await prisma.profileView.upsert({
       where: { viewerId_viewedId: { viewerId: currentUser.id, viewedId } },
       update: { createdAt: new Date() },
@@ -319,7 +339,7 @@ router.post('/:userId/view', authenticateToken, async (req: AuthenticatedRequest
     });
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Request could not be completed' });
   }
 });
 
@@ -327,49 +347,45 @@ router.post('/:userId/view', authenticateToken, async (req: AuthenticatedRequest
 router.get('/me/viewers', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true, isPremium: true },
     });
     if (!currentUser) return res.status(401).json({ error: 'Unauthorized' });
 
     const views = await prisma.profileView.findMany({
-      where: { viewedId: currentUser.id },
+      where: { viewedId: currentUser.id, viewer: visibleUserWhere(currentUser.id) },
       orderBy: { createdAt: 'desc' },
       take: 50,
       include: {
         viewer: {
-          select: {
-            id: true, firstName: true, profilePictures: true,
-            occupation: true, dateOfBirth: true, isVerified: true,
-          },
+          select: publicProfileSelect,
         },
       },
     });
 
     res.json({
-      views: views.map((v) => ({ id: v.id, createdAt: v.createdAt, viewer: v.viewer })),
+      views: currentUser.isPremium ? views.map((v) => ({ id: v.id, createdAt: v.createdAt, viewer: publicProfile(v.viewer) })) : [],
       isPremium: currentUser.isPremium,
       count: views.length,
     });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Request could not be completed' });
   }
 });
 
 // ── GET /users/:userId — public profile (MUST be last) ───────────────────────
 router.get('/:userId', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.userId },
-      select: {
-        id: true, firstName: true, bio: true, profilePictures: true,
-        profileVideo: true, isVerified: true, occupation: true, dateOfBirth: true,
-      },
+    const viewer = await prisma.user.findUnique({ where: activeUserIdentityWhere(req.user!.uid), select: { id: true } });
+    if (!viewer) return res.status(401).json({ error: 'Unauthorized' });
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.userId, ...visibleUserWhere(viewer.id) },
+      select: publicProfileSelect,
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ user });
+    res.json({ user: publicProfile(user) });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Request could not be completed' });
   }
 });
 

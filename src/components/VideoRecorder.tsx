@@ -1,3 +1,4 @@
+import { errorMessage, errorField } from '../utils/errors';
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -21,7 +22,6 @@ export default function VideoRecorder({ onRecordingComplete, isUploading }: Vide
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
-  const [_hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -39,14 +39,12 @@ export default function VideoRecorder({ onRecordingComplete, isUploading }: Vide
         audio: true,
       });
       streamRef.current = stream;
-      setHasPermission(true);
       setCameraActive(true);
-    } catch (err: any) {
-      const message = err.name === 'NotAllowedError'
+    } catch (err: unknown) {
+      const message = errorField(err, 'name') === 'NotAllowedError'
         ? 'Camera permission denied. Enable it in settings and try again.'
         : 'Unable to access camera. Make sure it\'s not in use.';
       setRecordingError(message);
-      setHasPermission(false);
       toast.error(message);
     }
   };
@@ -106,9 +104,9 @@ export default function VideoRecorder({ onRecordingComplete, isUploading }: Vide
           return t + 1;
         });
       }, 1000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error('Failed to start recording');
-      setRecordingError(err.message);
+      setRecordingError(errorMessage(err, 'Failed to start recording'));
     }
   };
 

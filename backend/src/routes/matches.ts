@@ -1,8 +1,11 @@
+import { activeUserIdentityWhere } from '../lib/access';
 import express from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { notifyNewMatch } from '../lib/notifications';
+import { accessibleMatchWhere, visibleUserWhere } from '../lib/access';
+import { publicProfile, publicProfileSelect, messageSenderSelect } from '../lib/profiles';
 
 const router = express.Router();
 
@@ -24,7 +27,7 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     const effectiveIsSuper = isSuper || signalType === 'HIGH_VALUE' || signalType === 'ALIGNED';
 
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
     });
 
     if (!currentUser) {
@@ -34,13 +37,23 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     if (currentUser.id === receiverId) {
       return res.status(400).json({ error: 'Cannot like yourself' });
     }
+    const receiver = await prisma.user.findFirst({
+      where: { id: receiverId, ...visibleUserWhere(currentUser.id) }, select: { id: true },
+    });
+    if (!receiver || !currentUser.isActive) return res.status(404).json({ error: 'User not found' });
+    if (!currentUser.isPremium && effectiveIsSuper) {
+      const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+      if (await prisma.like.count({ where: { senderId: currentUser.id, isSuper: true, isPass: false, createdAt: { gte: start } } }) >= 3) {
+        return res.status(429).json({ error: 'Daily super-like limit reached', limitReached: true, limit: 3 });
+      }
+    }
 
     // Enforce daily like limit for free users (super likes have their own limit)
     if (!currentUser.isPremium && !effectiveIsSuper) {
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const likesToday = await prisma.like.count({
-        where: { senderId: currentUser.id, isSuper: false, createdAt: { gte: startOfDay } },
+        where: { senderId: currentUser.id, isSuper: false, isPass: false, createdAt: { gte: startOfDay } },
       });
       const FREE_DAILY_LIKES = 20;
       if (likesToday >= FREE_DAILY_LIKES) {
@@ -51,8 +64,8 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     // Upsert like (handles duplicate swipes gracefully)
     const like = await prisma.like.upsert({
       where: { senderId_receiverId: { senderId: currentUser.id, receiverId } },
-      update: { isSuper: effectiveIsSuper, signalType: signalType ?? null },
-      create: { senderId: currentUser.id, receiverId, isSuper: effectiveIsSuper, signalType: signalType ?? null },
+      update: { isPass: false, isSuper: effectiveIsSuper, signalType: signalType ?? null },
+      create: { senderId: currentUser.id, receiverId, isPass: false, isSuper: effectiveIsSuper, signalType: signalType ?? null },
     });
 
     // Check for mutual like
@@ -63,13 +76,13 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
     });
 
     let match = null;
-    if (mutualLike) {
+    if (mutualLike && !mutualLike.isPass) {
       const [u1, u2] = [currentUser.id, receiverId].sort();
       match = await prisma.match.upsert({
         where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
         update: { isActive: true },
         create: { user1Id: u1, user2Id: u2 },
-        include: { user1: true, user2: true },
+        include: { user1: { select: publicProfileSelect }, user2: { select: publicProfileSelect } },
       });
 
       // Fire-and-forget push notifications to both users
@@ -85,29 +98,34 @@ router.post('/like', authenticateToken, async (req: AuthenticatedRequest, res) =
       }).catch(() => {});;
     }
 
-    res.json({ like, match, isMatch: !!match });
+    res.json({ like, match: match ? { ...match, user1: publicProfile(match.user1), user2: publicProfile(match.user2) } : null, isMatch: !!match });
   } catch (error) {
     console.error('Like error:', error);
     res.status(500).json({ error: 'Failed to like user' });
   }
 });
 
-// Pass (skip) a user — creates a like record with isPass=true equivalent via a sentinel
-// For now we just treat pass the same as a non-super like so they don't show again
+// A pass is stored separately from a positive like and cannot form a match.
 router.post('/pass', authenticateToken, async (req: AuthenticatedRequest, res) => {
+  const parsed = z.object({ receiverId: z.string().min(1).max(128) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid request' });
   try {
-    const { receiverId } = z.object({ receiverId: z.string().min(1) }).parse(req.body);
+    const { receiverId } = parsed.data;
 
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!currentUser) return res.status(404).json({ error: 'User not found' });
 
+    if (receiverId === currentUser.id || !await prisma.user.findFirst({
+      where: { id: receiverId, ...visibleUserWhere(currentUser.id) }, select: { id: true },
+    })) return res.status(404).json({ error: 'User not found' });
+
     await prisma.like.upsert({
       where: { senderId_receiverId: { senderId: currentUser.id, receiverId } },
-      update: {},
-      create: { senderId: currentUser.id, receiverId, isSuper: false },
+      update: { isPass: true, isSuper: false, signalType: null },
+      create: { senderId: currentUser.id, receiverId, isSuper: false, isPass: true },
     });
 
     res.json({ success: true });
@@ -121,7 +139,7 @@ router.post('/pass', authenticateToken, async (req: AuthenticatedRequest, res) =
 router.get('/', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
     });
 
     if (!currentUser) {
@@ -129,17 +147,14 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res) => {
     }
 
     const matches = await prisma.match.findMany({
-      where: {
-        OR: [{ user1Id: currentUser.id }, { user2Id: currentUser.id }],
-        isActive: true,
-      },
+      where: accessibleMatchWhere(currentUser.id),
       include: {
-        user1: true,
-        user2: true,
+        user1: { select: publicProfileSelect },
+        user2: { select: publicProfileSelect },
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: { sender: true },
+          include: { sender: { select: messageSenderSelect } },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -147,7 +162,9 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res) => {
 
     const formattedMatches = matches.map((match) => ({
       ...match,
-      otherUser: match.user1Id === currentUser.id ? match.user2 : match.user1,
+      user1: publicProfile(match.user1),
+      user2: publicProfile(match.user2),
+      otherUser: publicProfile(match.user1Id === currentUser.id ? match.user2 : match.user1),
       lastMessage: match.messages[0] ?? null,
     }));
 
@@ -164,18 +181,14 @@ router.get('/:matchId/profile', authenticateToken, async (req: AuthenticatedRequ
     const { matchId } = req.params;
 
     const currentUser = await prisma.user.findUnique({
-      where: { firebaseUid: req.user!.uid },
+      where: activeUserIdentityWhere(req.user!.uid),
       select: { id: true },
     });
     if (!currentUser) return res.status(404).json({ error: 'User not found' });
 
     const match = await prisma.match.findFirst({
-      where: {
-        id: matchId,
-        OR: [{ user1Id: currentUser.id }, { user2Id: currentUser.id }],
-        isActive: true,
-      },
-      include: { user1: true, user2: true },
+      where: accessibleMatchWhere(currentUser.id, matchId),
+      include: { user1: { select: publicProfileSelect }, user2: { select: publicProfileSelect } },
     });
     if (!match) return res.status(404).json({ error: 'Match not found' });
 
@@ -183,27 +196,7 @@ router.get('/:matchId/profile', authenticateToken, async (req: AuthenticatedRequ
 
     res.json({
       matchId,
-      user: {
-        id: other.id,
-        firstName: other.firstName,
-        lastName: other.lastName,
-        dateOfBirth: other.dateOfBirth,
-        gender: other.gender,
-        location: other.location,
-        bio: other.bio,
-        occupation: other.occupation,
-        education: other.education,
-        height: other.height,
-        interests: other.interests,
-        lookingFor: other.lookingFor,
-        ageRangeMin: other.ageRangeMin,
-        ageRangeMax: other.ageRangeMax,
-        maxDistance: other.maxDistance,
-        profileVideos: other.profileVideos,
-        profileVideo: other.profileVideo,
-        isVerified: other.isVerified,
-        lastActive: other.lastActive,
-      },
+      user: publicProfile(other),
     });
   } catch (error) {
     console.error('Match profile error:', error);

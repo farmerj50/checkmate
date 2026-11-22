@@ -38,6 +38,8 @@ export interface Post {
   reactionCount: number;
   reactions: Record<string, number>;
   viewerReactions: string[];
+  saveCount: number;
+  isSaved: boolean;
   replyCount: number;
   parentPostId: string | null;
   createdAt: string;
@@ -70,6 +72,11 @@ export interface ReactionRequest {
 
 export interface ReactionResponse {
   reacted: boolean;
+  count: number;
+}
+
+export interface SaveResponse {
+  saved: boolean;
   count: number;
 }
 

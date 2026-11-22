@@ -22,4 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Env files — every variant, everywhere in the tree. The bare ".env" rule
+# above didn't match ".env.dev" / ".env.development" / ".env.production",
+# which is how backend/.env.dev (Stripe test keys, JWT secret) and three
+# frontend env files ended up tracked in git history.
 .env
+.env.*
+!.env.example
+!**/.env.example

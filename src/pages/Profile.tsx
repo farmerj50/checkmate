@@ -1,3 +1,4 @@
+import { errorMessage } from '../utils/errors';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,12 +7,11 @@ import {
   Edit3, Settings, MapPin, Briefcase, GraduationCap,
   Heart, X, ChevronRight, Ruler, BadgeCheck,
   LogOut, ShieldCheck, Clock, Crown, Zap, Video, Trash2, Play, Star,
-  Plus, Camera, Users, Sparkles, Pencil, Grid3x3,
+  Plus, Camera, Users, Sparkles, Pencil, Grid3x3, Bookmark,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
-import { auth } from '../lib/firebase';
+import { useAuth } from '../contexts/auth';
+import { api, getAccessToken } from '../lib/api';
 import type { User } from '../types';
 import { socialService, type SocialPost } from '../services/social';
 import Button from '../components/ui/Button';
@@ -227,7 +227,7 @@ function VideoManager({
               >
                 <div className="aspect-[9/16] max-h-48 bg-black relative group overflow-hidden">
                   <video
-                    src={url}
+                    src={normalizeAssetUrl(url)}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     muted
                     playsInline
@@ -336,10 +336,10 @@ function EditSheet({
 }) {
   const [selectedInterests, setSelectedInterests] = useState<string[]>(user.interests);
   const [profileVideos, setProfileVideos] = useState<string[]>(
-    (user.profileVideos ?? []).map(normalizeAssetUrl).filter(Boolean) as string[]
+    user.profileVideos ?? []
   );
   const [activeVideo, setActiveVideo] = useState<string | undefined>(
-    normalizeAssetUrl(user.profileVideo)
+    user.profileVideo
   );
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -371,15 +371,12 @@ function EditSheet({
       prev.includes(interest) ? prev.filter((i) => i !== interest) : [...prev, interest]
     );
 
-  const getAuthToken = async () =>
-    localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
-
   const handleVideoUpload = async (file: File) => {
     setUploading(true);
     try {
       const formData = new FormData();
       formData.append('video', file);
-      const token = await getAuthToken();
+      const token = await getAccessToken();
       const res = await fetch('/api/upload/video', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -387,13 +384,13 @@ function EditSheet({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setProfileVideos(data.profileVideos.map(normalizeAssetUrl).filter(Boolean) as string[]);
+      setProfileVideos(data.profileVideos);
       setActiveVideo((current) =>
-        current || normalizeAssetUrl(data.profileVideo)
+        current || data.profileVideo
       );
       toast.success('Video uploaded');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Video upload failed');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Video upload failed'));
     } finally {
       setUploading(false);
     }
@@ -401,7 +398,7 @@ function EditSheet({
 
   const handleDeleteVideo = async (url: string) => {
     try {
-      const token = await getAuthToken();
+      const token = await getAccessToken();
       const res = await fetch('/api/upload/video', {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -409,17 +406,17 @@ function EditSheet({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setProfileVideos(data.profileVideos.map(normalizeAssetUrl).filter(Boolean) as string[]);
-      setActiveVideo(normalizeAssetUrl(data.profileVideo ?? undefined));
+      setProfileVideos(data.profileVideos);
+      setActiveVideo(data.profileVideo ?? undefined);
       toast.success('Video removed');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to remove video');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to remove video'));
     }
   };
 
   const handleSetActive = async (url: string) => {
     try {
-      const token = await getAuthToken();
+      const token = await getAccessToken();
       const res = await fetch('/api/upload/video/active', {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -427,10 +424,10 @@ function EditSheet({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setActiveVideo(normalizeAssetUrl(data.profileVideo));
+      setActiveVideo(data.profileVideo);
       toast.success('Active video updated');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to update active video');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to update active video'));
     }
   };
 
@@ -704,15 +701,19 @@ export default function Profile() {
   const [editTab, setEditTab] = useState<'record' | 'upload'>('record');
   const [boosting, setBoosting] = useState(false);
   const [boostedUntil, setBoostedUntil] = useState<Date | null>(null);
-  const [verifying, setVerifying] = useState(false);
-  const verifyInputRef = useRef<HTMLInputElement>(null);
-  const [profileTab, setProfileTab] = useState<'dating' | 'posts'>('dating');
+  const [profileTab, setProfileTab] = useState<'dating' | 'posts' | 'saved'>('dating');
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [postsStatus, setPostsStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [postsError, setPostsError] = useState<Error | null>(null);
   const [postsCursor, setPostsCursor] = useState<string | null>(null);
   const [postsHasMore, setPostsHasMore] = useState(false);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [savedPosts, setSavedPosts] = useState<SocialPost[]>([]);
+  const [savedPostsStatus, setSavedPostsStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [savedPostsError, setSavedPostsError] = useState<Error | null>(null);
+  const [savedPostsCursor, setSavedPostsCursor] = useState<string | null>(null);
+  const [savedPostsHasMore, setSavedPostsHasMore] = useState(false);
+  const [loadingMoreSavedPosts, setLoadingMoreSavedPosts] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [followCounts, setFollowCounts] = useState<{ followers: number; following: number }>({ followers: 0, following: 0 });
@@ -752,10 +753,42 @@ export default function Profile() {
     }
   }
 
+  function loadSavedPosts() {
+    setSavedPostsStatus('loading');
+    setSavedPostsError(null);
+    socialService.getSavedPosts()
+      .then((page) => {
+        setSavedPosts(page.items);
+        setSavedPostsCursor(page.nextCursor);
+        setSavedPostsHasMore(!!page.nextCursor);
+        setSavedPostsStatus('success');
+      })
+      .catch((err) => {
+        setSavedPostsError(err instanceof Error ? err : new Error(String(err)));
+        setSavedPostsStatus('error');
+      });
+  }
+
+  async function loadMoreSavedPosts() {
+    if (!savedPostsCursor || loadingMoreSavedPosts) return;
+    setLoadingMoreSavedPosts(true);
+    try {
+      const page = await socialService.getSavedPosts(savedPostsCursor);
+      setSavedPosts((prev) => [...prev, ...page.items]);
+      setSavedPostsCursor(page.nextCursor);
+      setSavedPostsHasMore(!!page.nextCursor);
+    } catch {
+      toast.error('Could not load more saved videos');
+    } finally {
+      setLoadingMoreSavedPosts(false);
+    }
+  }
+
   useEffect(() => {
     api.get<{ user: User }>('/users/profile').then((d) => {
       setUser(d.user);
       loadPosts(d.user.id);
+      loadSavedPosts();
     }).catch(() => toast.error('Failed to load profile')).finally(() => setLoading(false));
   }, []);
 
@@ -764,6 +797,7 @@ export default function Profile() {
     try {
       await socialService.deletePost(postId);
       setPosts((prev) => prev.filter((p) => p.id !== postId));
+      setSavedPosts((prev) => prev.filter((p) => p.id !== postId));
       toast.success('Post deleted');
     } catch {
       toast.error('Failed to delete post');
@@ -784,23 +818,8 @@ export default function Profile() {
 
   const videos = (user.profileVideos ?? []).map(normalizeAssetUrl).filter(Boolean) as string[];
 
-  const handleVerificationPhoto = async (_file: File) => {
-    setVerifying(true);
-    try {
-      const data = await api.post<{ isVerified: boolean }>('/safety/verify', {});
-      if (data.isVerified) {
-        toast.success('Profile verified!');
-        setUser((u) => u ? { ...u, isVerified: true } : u);
-      }
-    } catch (err: any) {
-      toast.error(err.message ?? 'Verification failed');
-    } finally {
-      setVerifying(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#020617] pb-24 relative overflow-hidden">
+    <div className="min-h-screen bg-[#020617] pb-24 relative overflow-hidden lg:pl-[220px]">
       {/* Ambient glow */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[#8b5cf6]/10 rounded-full blur-3xl" />
@@ -1020,7 +1039,7 @@ export default function Profile() {
           )}
         </div>
 
-        {/* Tab switcher: Dating Profile | Posts */}
+        {/* Tab switcher: Dating Profile | Posts | Saved */}
         <div className="flex bg-white/5 rounded-2xl p-1 gap-1">
           <button
             onClick={() => setProfileTab('dating')}
@@ -1035,6 +1054,13 @@ export default function Profile() {
           >
             <Grid3x3 className="w-4 h-4" />
             Posts {posts.length > 0 && <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full">{posts.length}</span>}
+          </button>
+          <button
+            onClick={() => setProfileTab('saved')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors ${profileTab === 'saved' ? 'bg-white/12 text-white' : 'text-white/40 hover:text-white/70'}`}
+          >
+            <Bookmark className="w-4 h-4" />
+            Saved {savedPosts.length > 0 && <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full">{savedPosts.length}</span>}
           </button>
         </div>
 
@@ -1127,6 +1153,60 @@ export default function Profile() {
           </AsyncState>
         )}
 
+        {profileTab === 'saved' && (
+          <AsyncState
+            loading={savedPostsStatus === 'loading'}
+            error={savedPostsError}
+            errorMessage="Couldn't load saved videos."
+            onRetry={loadSavedPosts}
+            empty={false}
+          >
+            {savedPosts.length === 0 ? (
+              <div className="text-center py-16 rounded-3xl bg-white/3 border border-white/5">
+                <Bookmark className="w-10 h-10 text-white/15 mx-auto mb-3" />
+                <p className="text-white/40 text-sm">No saved videos yet</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2 px-0.5">
+                  <span className="text-white/40 text-xs">{savedPosts.length} saved {savedPosts.length === 1 ? 'video' : 'videos'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-0.5 rounded-2xl overflow-hidden">
+                  {savedPosts.map((p, i) => {
+                    const media = normalizeAssetUrl(p.videoUrl);
+                    return (
+                      <motion.button
+                        key={p.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: i * 0.03 }}
+                        onClick={() => navigate(`/post/${p.id}`)}
+                        className="relative aspect-square bg-white/5 overflow-hidden"
+                      >
+                        <video src={media ? `${media}#t=0.001` : ''} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                        <div className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5">
+                          <Bookmark className="w-3.5 h-3.5 text-[#ff4d8d] fill-[#ff4d8d]" />
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+                {savedPostsHasMore && (
+                  <div className="flex justify-center mt-4">
+                    <button
+                      onClick={loadMoreSavedPosts}
+                      disabled={loadingMoreSavedPosts}
+                      className="px-5 py-2 rounded-full bg-white/8 border border-white/10 text-white/60 text-sm font-medium hover:text-white disabled:opacity-50 transition-colors"
+                    >
+                      {loadingMoreSavedPosts ? 'Loading...' : 'Load more'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </AsyncState>
+        )}
+
         {profileTab === 'dating' && <>
 
         {/* Verification */}
@@ -1146,32 +1226,10 @@ export default function Profile() {
               </div>
               <div className="flex-1">
                 <p className="font-semibold text-white mb-0.5">Get verified</p>
-                <p className="text-xs text-white/40 mb-3">Show others your profile is real. Takes 30 seconds.</p>
-                <button
-                  onClick={() => verifyInputRef.current?.click()}
-                  disabled={verifying}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 active:scale-95 transition-all disabled:opacity-60"
-                >
-                  {verifying ? (
-                    <><Clock className="w-4 h-4 animate-spin" /> Verifying…</>
-                  ) : (
-                    <><Camera className="w-4 h-4" /> Take verification selfie</>
-                  )}
-                </button>
+                <p className="text-xs text-white/40">Identity verification is not available yet.</p>
               </div>
             </div>
-            <input
-              ref={verifyInputRef}
-              type="file"
-              accept="image/*"
-              capture="user"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleVerificationPhoto(file);
-                e.target.value = '';
-              }}
-            />
+
           </div>
         )}
 
@@ -1215,8 +1273,8 @@ export default function Profile() {
                     const data = await api.post<{ boostedUntil: string }>('/premium/boost', {});
                     setBoostedUntil(new Date(data.boostedUntil));
                     toast.success('Profile boosted for 30 minutes!');
-                  } catch (err: any) {
-                    toast.error(err.message ?? 'Could not activate boost');
+                  } catch (err: unknown) {
+                    toast.error(errorMessage(err, 'Could not activate boost'));
                   } finally {
                     setBoosting(false);
                   }

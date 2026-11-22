@@ -17,11 +17,15 @@ function expectPostShape(post: any) {
   expect(post).toHaveProperty('reactionCount');
   expect(post).toHaveProperty('reactions');
   expect(post).toHaveProperty('viewerReactions');
+  expect(post).toHaveProperty('saveCount');
+  expect(post).toHaveProperty('isSaved');
   expect(post).toHaveProperty('replyCount');
   expect(post).toHaveProperty('parentPostId');
   expect(post).toHaveProperty('createdAt');
   expect(typeof post.reactions).toBe('object');
   expect(Array.isArray(post.viewerReactions)).toBe(true);
+  expect(typeof post.saveCount).toBe('number');
+  expect(typeof post.isSaved).toBe('boolean');
 }
 
 describe('OpenAPI contract basic validation', () => {
@@ -36,11 +40,13 @@ describe('OpenAPI contract basic validation', () => {
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining([
       '/api/upload/post-media',
       '/api/social/posts',
+      '/api/social/posts/saved',
       '/api/social/posts/{postId}',
       '/api/social/posts/{postId}/replies',
       '/api/social/posts/feed',
       '/api/social/posts/user/{userId}',
       '/api/social/posts/{postId}/reactions',
+      '/api/social/posts/{postId}/save',
       '/api/social/follow/{userId}',
       '/api/social/block/{userId}',
       '/api/social/reports',
@@ -53,6 +59,8 @@ describe('OpenAPI contract basic validation', () => {
     expect(res.body.post.reactionCount).toBe(0);
     expect(res.body.post.reactions).toEqual({});
     expect(res.body.post.viewerReactions).toEqual([]);
+    expect(res.body.post.saveCount).toBe(0);
+    expect(res.body.post.isSaved).toBe(false);
   });
 
   it('feed, profile, and replies responses match paginated contract shapes', async () => {
@@ -129,6 +137,50 @@ describe('OpenAPI contract basic validation', () => {
     expect(afterClearAsAlice.body.post.reactionCount).toBe(2);
     expect(afterClearAsAlice.body.post.reactions).toEqual({ [fire]: 2 });
     expect(afterClearAsAlice.body.post.viewerReactions).toEqual([fire]);
+  });
+
+  it('contract includes persisted save state and save endpoints adhere', async () => {
+    const doc = readContract();
+    expect(Object.keys(doc.paths)).toContain('/api/social/posts/saved');
+    expect(Object.keys(doc.paths)).toContain('/api/social/posts/{postId}/save');
+    expect(doc.components.schemas.Post.required).toEqual(expect.arrayContaining(['saveCount', 'isSaved']));
+
+    const created = await request(app).post('/api/social/posts').set(authHeader(B)).send({ videoUrl: 'http://example.test/saved-contract.mp4' });
+    expect(created.status).toBe(201);
+    expectPostShape(created.body.post);
+    expect(created.body.post.saveCount).toBe(0);
+    expect(created.body.post.isSaved).toBe(false);
+    const postId = created.body.post.id;
+
+    const save = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(save.status).toBe(200);
+    expect(save.body).toEqual({ saved: true, count: 1 });
+
+    const saveAgain = await request(app).post(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(saveAgain.status).toBe(200);
+    expect(saveAgain.body).toEqual({ saved: true, count: 1 });
+
+    const viewedByAlice = await request(app).get(`/api/social/posts/${postId}`).set(authHeader(A));
+    expect(viewedByAlice.status).toBe(200);
+    expectPostShape(viewedByAlice.body.post);
+    expect(viewedByAlice.body.post.saveCount).toBe(1);
+    expect(viewedByAlice.body.post.isSaved).toBe(true);
+
+    const viewedByBob = await request(app).get(`/api/social/posts/${postId}`).set(authHeader(B));
+    expect(viewedByBob.status).toBe(200);
+    expectPostShape(viewedByBob.body.post);
+    expect(viewedByBob.body.post.saveCount).toBe(1);
+    expect(viewedByBob.body.post.isSaved).toBe(false);
+
+    const saved = await request(app).get('/api/social/posts/saved').set(authHeader(A));
+    expect(saved.status).toBe(200);
+    expect(Array.isArray(saved.body.posts)).toBe(true);
+    expect(saved.body).toHaveProperty('nextCursor');
+    expect(saved.body.posts.map((post: any) => post.id)).toContain(postId);
+
+    const unsave = await request(app).delete(`/api/social/posts/${postId}/save`).set(authHeader(A)).send();
+    expect(unsave.status).toBe(200);
+    expect(unsave.body).toEqual({ saved: false, count: 0 });
   });
 
   it('follow, block, reports appear in openapi and respond correctly', async () => {

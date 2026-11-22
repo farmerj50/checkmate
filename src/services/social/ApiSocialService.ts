@@ -1,3 +1,4 @@
+import { errorField } from '../../utils/errors';
 import type { FollowStatus, SocialNotification } from '../../types';
 import { api } from '../../lib/api';
 import type { SocialService } from './SocialService';
@@ -21,8 +22,8 @@ import type {
  * integration testing instead of masquerading as "no data".
  */
 
-function expect<T>(data: any, keys: (keyof T)[], context: string): T {
-  const missing = keys.filter((k) => data == null || !(k in data));
+function expect<T>(data: unknown, keys: (keyof T)[], context: string): T {
+  const missing = keys.filter((k) => data == null || typeof data !== 'object' || !(k in data));
   if (missing.length > 0) {
     throw new Error(
       `ApiSocialService.${context}: response did not match the frozen OpenAPI contract — ` +
@@ -36,7 +37,7 @@ export class ApiSocialService implements SocialService {
   // GET /api/social/posts/feed -> PaginatedPostsResponse { posts, nextCursor }
   async getFeed(cursor?: string): Promise<Page<SocialPost>> {
     const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const raw = await api.get<any>(`/social/posts/feed${qs}`);
+    const raw = await api.get<unknown>(`/social/posts/feed${qs}`);
     const data = expect<{ posts: SocialPost[]; nextCursor: string | null }>(raw, ['posts', 'nextCursor'], 'getFeed');
     return { items: data.posts, nextCursor: data.nextCursor };
   }
@@ -44,19 +45,27 @@ export class ApiSocialService implements SocialService {
   // GET /api/social/posts/user/:userId -> PaginatedPostsResponse { posts, nextCursor }
   async getUserPosts(userId: string, cursor?: string): Promise<Page<SocialPost>> {
     const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const raw = await api.get<any>(`/social/posts/user/${userId}${qs}`);
+    const raw = await api.get<unknown>(`/social/posts/user/${userId}${qs}`);
     const data = expect<{ posts: SocialPost[]; nextCursor: string | null }>(raw, ['posts', 'nextCursor'], 'getUserPosts');
+    return { items: data.posts, nextCursor: data.nextCursor };
+  }
+
+  // GET /api/social/posts/saved -> PaginatedPostsResponse { posts, nextCursor }
+  async getSavedPosts(cursor?: string): Promise<Page<SocialPost>> {
+    const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+    const raw = await api.get<unknown>(`/social/posts/saved${qs}`);
+    const data = expect<{ posts: SocialPost[]; nextCursor: string | null }>(raw, ['posts', 'nextCursor'], 'getSavedPosts');
     return { items: data.posts, nextCursor: data.nextCursor };
   }
 
   // GET /api/social/posts/:postId -> CreatePostResponse { post }
   async getPost(postId: string): Promise<SocialPost | null> {
     try {
-      const raw = await api.get<any>(`/social/posts/${postId}`);
+      const raw = await api.get<unknown>(`/social/posts/${postId}`);
       const data = expect<{ post: SocialPost }>(raw, ['post'], 'getPost');
       return data.post;
-    } catch (err: any) {
-      if (err?.status === 404) return null;
+    } catch (err: unknown) {
+      if (errorField(err, 'status') === 404) return null;
       throw err;
     }
   }
@@ -65,7 +74,7 @@ export class ApiSocialService implements SocialService {
   // Key is `replies`, NOT `posts` — distinct from every other list envelope here.
   async getReplies(postId: string, cursor?: string): Promise<Page<SocialPost>> {
     const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-    const raw = await api.get<any>(`/social/posts/${postId}/replies${qs}`);
+    const raw = await api.get<unknown>(`/social/posts/${postId}/replies${qs}`);
     const data = expect<{ replies: SocialPost[]; nextCursor: string | null }>(raw, ['replies', 'nextCursor'], 'getReplies');
     return { items: data.replies, nextCursor: data.nextCursor };
   }
@@ -74,7 +83,7 @@ export class ApiSocialService implements SocialService {
   // CreatePostRequest requires only videoUrl; authorId is server-assigned
   // (ignored if sent), matching CreatePostInput already having no authorId field.
   async createPost(input: CreatePostInput): Promise<SocialPost> {
-    const raw = await api.post<any>('/social/posts', input);
+    const raw = await api.post<unknown>('/social/posts', input);
     const data = expect<{ post: SocialPost }>(raw, ['post'], 'createPost');
     return data.post;
   }
@@ -86,7 +95,7 @@ export class ApiSocialService implements SocialService {
 
   // DELETE /api/social/posts/:postId -> SuccessResponse { success }
   async deletePost(postId: string): Promise<void> {
-    const raw = await api.delete<any>(`/social/posts/${postId}`);
+    const raw = await api.delete<unknown>(`/social/posts/${postId}`);
     expect<{ success: boolean }>(raw, ['success'], 'deletePost');
   }
 
@@ -97,7 +106,7 @@ export class ApiSocialService implements SocialService {
   // to merge a partial update client-side, this re-fetches the canonical post
   // via the already-verified GET /social/posts/:postId.
   async setReaction(postId: string, emoji: string): Promise<SocialPost> {
-    const raw = await api.post<any>(`/social/posts/${postId}/reactions`, { emoji });
+    const raw = await api.post<unknown>(`/social/posts/${postId}/reactions`, { emoji });
     expect<{ reacted: boolean; count: number }>(raw, ['reacted', 'count'], 'setReaction');
     const post = await this.getPost(postId);
     if (!post) throw new Error(`ApiSocialService.setReaction: post ${postId} not found after reacting`);
@@ -108,16 +117,35 @@ export class ApiSocialService implements SocialService {
   // (required per the OpenAPI schema — confirmed, not inferred) ->
   // ReactionResponse { reacted, count }. Same re-fetch rationale as setReaction.
   async clearReaction(postId: string, emoji: string): Promise<SocialPost> {
-    const raw = await api.delete<any>(`/social/posts/${postId}/reactions`, { emoji });
+    const raw = await api.delete<unknown>(`/social/posts/${postId}/reactions`, { emoji });
     expect<{ reacted: boolean; count: number }>(raw, ['reacted', 'count'], 'clearReaction');
     const post = await this.getPost(postId);
     if (!post) throw new Error(`ApiSocialService.clearReaction: post ${postId} not found after clearing`);
     return post;
   }
 
+  // POST/DELETE /api/social/posts/:postId/save -> SaveResponse { saved, count }.
+  // The response is intentionally compact, so re-fetch the canonical Post with
+  // updated saveCount/isSaved before returning to screens.
+  async savePost(postId: string): Promise<SocialPost> {
+    const raw = await api.post<unknown>(`/social/posts/${postId}/save`, {});
+    expect<{ saved: boolean; count: number }>(raw, ['saved', 'count'], 'savePost');
+    const post = await this.getPost(postId);
+    if (!post) throw new Error(`ApiSocialService.savePost: post ${postId} not found after saving`);
+    return post;
+  }
+
+  async unsavePost(postId: string): Promise<SocialPost> {
+    const raw = await api.delete<unknown>(`/social/posts/${postId}/save`);
+    expect<{ saved: boolean; count: number }>(raw, ['saved', 'count'], 'unsavePost');
+    const post = await this.getPost(postId);
+    if (!post) throw new Error(`ApiSocialService.unsavePost: post ${postId} not found after unsaving`);
+    return post;
+  }
+
   // GET /api/social/users/:userId/follow-status -> FollowStatusResponse
   async getFollowStatus(userId: string): Promise<FollowStatus> {
-    const raw = await api.get<any>(`/social/users/${userId}/follow-status`);
+    const raw = await api.get<unknown>(`/social/users/${userId}/follow-status`);
     return expect<FollowStatus>(raw, ['isFollowing', 'followerCount', 'followingCount'], 'getFollowStatus');
   }
 

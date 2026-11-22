@@ -1,9 +1,11 @@
+import { errorField, errorMessage } from '../utils/errors';
+import { birthDateError, onboardingFieldSteps, validateOnboarding } from '../utils/onboarding';
 import { useState, useEffect, useRef, KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Check, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronRight } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { api } from '../lib/api';
 import type { User } from '../types';
 
@@ -138,7 +140,7 @@ function LineInput({ value, onChange, placeholder, onEnter, type = 'text', autoF
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { firebaseUser, completeOnboarding } = useAuth();
+  const { firebaseUser, completeOnboarding, logout } = useAuth();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<FormData>(INITIAL);
   const [submitting, setSubmitting] = useState(false);
@@ -149,7 +151,13 @@ export default function Onboarding() {
   const set = (key: keyof FormData) => (val: string) =>
     setForm((f) => ({ ...f, [key]: val }));
 
-  const next = () => setStep((s) => s + 1);
+  // Repeated clicks during an exit animation must not skip the next question.
+  const next = () => setStep(Math.min(step + 1, TOTAL_STEPS - 1));
+
+  const backToLogin = async () => {
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   const advance = (check: () => boolean, msg?: string) => {
     if (!check()) { if (msg) toast.error(msg); return; }
@@ -159,19 +167,24 @@ export default function Onboarding() {
   // `lookingFor` is passed directly because setState is async —
   // reading form.lookingFor inside submit would see the stale value.
   const submit = async (lookingFor: string) => {
-    if (!firebaseUser) return;
-    if (form.interests.length < 3) { toast.error('Pick at least 3 interests'); return; }
+    if (!firebaseUser || submitting) return;
+    const validation = validateOnboarding({ ...form, lookingFor });
+    if (validation) {
+      setStep(validation.step);
+      toast.error(validation.message, { duration: 6000 });
+      return;
+    }
 
     setSubmitting(true);
     try {
       const { user } = await api.post<{ user: User }>('/auth/register', {
         userData: {
           email: firebaseUser.email,
-          firstName: form.firstName,
-          lastName: form.lastName,
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
           dateOfBirth: form.dateOfBirth,
           gender: form.gender,
-          location: form.location,
+          location: form.location.trim(),
           occupation: form.occupation || undefined,
           bio: form.bio || undefined,
           lookingFor,
@@ -183,9 +196,14 @@ export default function Onboarding() {
         },
       });
       completeOnboarding(user);
-      navigate('/discover');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Something went wrong');
+      navigate('/home', { replace: true });
+    } catch (err: unknown) {
+      const fields = errorField(err, 'fieldErrors');
+      const field = fields && typeof fields === 'object' ? Object.keys(fields)[0] : undefined;
+      if (field && Object.prototype.hasOwnProperty.call(onboardingFieldSteps, field)) setStep(onboardingFieldSteps[field]);
+      toast.error(field === 'email'
+        ? 'Your account email is invalid. Choose Sign in and use a valid email address.'
+        : errorMessage(err, 'Could not save your profile. Please try again.'), { duration: 6000 });
     } finally {
       setSubmitting(false);
     }
@@ -232,18 +250,10 @@ export default function Onboarding() {
         onChange={set('dateOfBirth')}
         placeholder="YYYY-MM-DD"
         type="date"
-        onEnter={() => advance(() => {
-          if (!form.dateOfBirth) return false;
-          const age = (Date.now() - new Date(form.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-          return age >= 18;
-        }, 'You must be 18 or older')}
+        onEnter={() => advance(() => !birthDateError(form.dateOfBirth), birthDateError(form.dateOfBirth) ?? undefined)}
       />
       <NextBtn
-        onClick={() => advance(() => {
-          if (!form.dateOfBirth) return false;
-          const age = (Date.now() - new Date(form.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-          return age >= 18;
-        }, 'You must be 18 or older')}
+        onClick={() => advance(() => !birthDateError(form.dateOfBirth), birthDateError(form.dateOfBirth) ?? undefined)}
         disabled={!form.dateOfBirth}
       />
     </StepWrap>,
@@ -255,7 +265,7 @@ export default function Onboarding() {
         {GENDERS.map((g) => (
           <button
             key={g.value}
-            onClick={() => { set('gender')(g.value); setTimeout(next, 220); }}
+            onClick={() => { set('gender')(g.value); next(); }}
             className={`py-4 px-5 rounded-2xl text-left font-medium text-base transition-all border-2 ${
               form.gender === g.value
                 ? 'border-pink-500 bg-pink-500/15 text-white'
@@ -362,7 +372,7 @@ export default function Onboarding() {
         {LOOKING_FOR.map((opt) => (
           <button
             key={opt.value}
-            onClick={() => { set('lookingFor')(opt.value); setTimeout(() => submit(opt.value), 260); }}
+            onClick={() => { set('lookingFor')(opt.value); void submit(opt.value); }}
             disabled={submitting}
             className={`w-full flex items-center justify-between px-5 py-4 rounded-2xl border-2 text-left transition-all ${
               form.lookingFor === opt.value
@@ -404,6 +414,15 @@ export default function Onboarding() {
       </div>
 
       {/* Step counter */}
+      <button
+        type="button"
+        onClick={backToLogin}
+        className="fixed top-4 left-5 z-50 flex items-center gap-2 text-white/40 hover:text-white transition-colors text-sm"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Sign in
+      </button>
+
       <div className="fixed top-4 right-5 text-white/25 text-xs tabular-nums z-50">
         {step + 1} / {TOTAL_STEPS}
       </div>
@@ -414,6 +433,16 @@ export default function Onboarding() {
           <AnimatePresence mode="wait">
             {steps[step]}
           </AnimatePresence>
+          {step > 0 && (
+            <button
+              type="button"
+              onClick={() => setStep(Math.max(0, step - 1))}
+              disabled={submitting}
+              className="mt-8 flex items-center gap-2 text-white/60 hover:text-white disabled:opacity-30 text-sm"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+          )}
         </div>
       </div>
     </div>

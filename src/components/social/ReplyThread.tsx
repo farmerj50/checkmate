@@ -6,6 +6,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { normalizeAssetUrl } from '../../utils/helpers';
 import AsyncState from '../ui/AsyncState';
 import ReactionBar from './ReactionBar';
+import SaveButton from './SaveButton';
 import ReplyRecorderModal from './ReplyRecorderModal';
 
 interface Props {
@@ -106,7 +107,10 @@ function ReplyRow({ reply, onChange }: { reply: SocialPost; onChange: (r: Social
           <video src={media ?? ''} className="w-full h-full object-cover" muted loop playsInline controls />
         </div>
         <div className="mt-1.5">
-          <ReactionBar post={reply} onChange={onChange} variant="inline" />
+          <div className="flex items-center gap-4">
+            <ReactionBar post={reply} onChange={onChange} variant="inline" />
+            <SaveButton post={reply} onChange={onChange} variant="inline" />
+          </div>
         </div>
       </div>
     </div>

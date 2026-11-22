@@ -13,16 +13,14 @@ export const formatDistance = (distance: number): string => {
 
 export const getCompatibilityScore = (
   user1Interests: string[],
-  user2Interests: string[],
-  _user1Preferences?: any,
-  _user2Preferences?: any
+  user2Interests: string[]
 ): number => {
   // Calculate interest overlap
   const commonInterests = user1Interests.filter(interest => 
     user2Interests.includes(interest)
   );
   
-  const interestScore = (commonInterests.length / Math.max(user1Interests.length, user2Interests.length)) * 100;
+  const interestScore = (commonInterests.length / Math.max(1, user1Interests.length, user2Interests.length)) * 100;
   
   // Add other factors like age compatibility, location, etc.
   // This is a simplified version

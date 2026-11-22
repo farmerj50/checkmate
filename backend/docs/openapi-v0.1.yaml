@@ -37,7 +37,7 @@ components:
           nullable: true
     Post:
       type: object
-      required: [id, authorId, author, videoUrl, reactionCount, reactions, viewerReactions, replyCount, parentPostId, createdAt]
+      required: [id, authorId, author, videoUrl, reactionCount, reactions, viewerReactions, saveCount, isSaved, replyCount, parentPostId, createdAt]
       properties:
         id:
           type: string
@@ -75,6 +75,13 @@ components:
           items:
             type: string
           example: ["\U0001F525"]
+        saveCount:
+          type: integer
+          minimum: 0
+          description: Total number of persisted save records for this post.
+        isSaved:
+          type: boolean
+          description: Whether the authenticated viewer has saved this post.
         replyCount:
           type: integer
           minimum: 0
@@ -145,6 +152,15 @@ components:
       required: [reacted, count]
       properties:
         reacted:
+          type: boolean
+        count:
+          type: integer
+          minimum: 0
+    SaveResponse:
+      type: object
+      required: [saved, count]
+      properties:
+        saved:
           type: boolean
         count:
           type: integer
@@ -340,6 +356,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/social/posts/saved:
+    get:
+      summary: Get videos saved by the authenticated user
+      description: Returns visible, non-deleted saved posts. Posts hidden by either side of a block relationship are excluded.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque saved-post id cursor. Pass it back as cursor on the next request.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: Saved post page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedPostsResponse"
   /api/social/posts/{postId}/replies:
     get:
       summary: Get video replies for a post
@@ -473,6 +514,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReactionResponse"
+  /api/social/posts/{postId}/save:
+    post:
+      summary: Save a video post idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Post is saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveResponse"
+        "403":
+          description: Block relationship prevents saving
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Missing or soft-deleted post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Unsave a video post idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Post is no longer saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveResponse"
   /api/social/follow/{userId}:
     post:
       summary: Follow a user idempotently

@@ -4,7 +4,7 @@ import { Bell, Loader2, Heart, UserPlus, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { normalizeAssetUrl } from '../utils/helpers';
 import { getSocket } from '../lib/socket';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { socialService } from '../services/social';
 import type { SocialNotification } from '../types';
 
@@ -53,7 +53,7 @@ export default function Notifications() {
   }
 
   return (
-    <div className="min-h-screen bg-[#050508] pb-20">
+    <div className="min-h-screen bg-[#050508] pb-20 lg:pl-[220px]">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-[#050508]/90 backdrop-blur-md border-b border-white/5 px-4 py-4 flex items-center justify-between">
         <h1 className="text-white font-bold text-xl">Notifications</h1>

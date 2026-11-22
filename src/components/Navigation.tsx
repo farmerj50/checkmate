@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Home, Search, Flame, PlusSquare, Heart, User } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { getSocket } from '../lib/socket';
 
 function useUnreadCount() {
@@ -57,9 +57,6 @@ const Navigation: React.FC = () => {
   const location  = useLocation();
   const unread = useUnreadCount();
 
-  // These pages use their own full-screen layout
-  if (location.pathname === '/explore' || location.pathname === '/studio' || location.pathname === '/dating') return null;
-
   const navItems = [
     { path: '/home',    icon: Home,   label: 'Home',    badge: 0 },
     { path: '/explore', icon: Search, label: 'Explore', badge: 0 },
@@ -69,7 +66,7 @@ const Navigation: React.FC = () => {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-[#050508]/95 backdrop-blur-xl border-t border-white/8 px-2 py-2 z-50">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#050508]/95 backdrop-blur-xl border-t border-white/8 px-2 py-2 z-50">
       <div className="flex justify-around items-center max-w-[720px] mx-auto">
         {/* First 2 tabs */}
         {navItems.slice(0, 2).map(({ path, icon: Icon, label, badge }) => (

@@ -4,6 +4,7 @@ import { BadgeCheck, Video } from 'lucide-react';
 import { normalizeAssetUrl } from '../utils/helpers';
 import ReactionBar from './social/ReactionBar';
 import ReplyThread from './social/ReplyThread';
+import SaveButton from './social/SaveButton';
 import type { SocialPost } from '../services/social';
 
 interface Props {
@@ -77,6 +78,7 @@ export default function PostCard({ post: initialPost, onChange }: Props) {
         {/* Actions */}
         <div className="flex items-center gap-5 px-4 py-3">
           <ReactionBar post={post} onChange={handleChange} variant="inline" />
+          <SaveButton post={post} onChange={handleChange} variant="inline" />
           <button onClick={() => setShowReplies(true)} className="flex items-center gap-1.5">
             <Video className="w-5 h-5 text-white/70" />
             <span className="text-white/60 text-sm">{post.replyCount > 0 ? post.replyCount : 'Reply'}</span>

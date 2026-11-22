@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-11-22T04:11:36.451Z",
+  "checks": [
+    "Invalid email stopped before onboarding",
+    "Double click advances exactly one question",
+    "Invalid birth year stopped at birthday question",
+    "Double gender click cannot skip location",
+    "Real HTTP 400 returns to the rejected field and keeps its draft",
+    "Back navigation retains names, location and interests",
+    "Retry creates the networking profile and opens the home feed"
+  ],
+  "registrationStatuses": [
+    400,
+    200
+  ],
+  "browserExceptions": 0
+}

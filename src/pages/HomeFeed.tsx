@@ -1,39 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { BadgeCheck, Loader2, PlusSquare, Bell, Video } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BadgeCheck, Loader2, PlusSquare, Bell, Video, PartyPopper, ShoppingBag } from 'lucide-react';
 import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
-import { getSocket } from '../lib/socket';
+import { useNotificationCount } from '../contexts/notificationCount';
 import { normalizeAssetUrl } from '../utils/helpers';
 import ReactionBar from '../components/social/ReactionBar';
 import ReplyThread from '../components/social/ReplyThread';
 import { socialService, type SocialPost } from '../services/social';
 import type { DailyPrompt } from '../types';
-
-function useNotificationCount() {
-  const { dbUser } = useAuth();
-  const [count, setCount] = useState(0);
-  const socketRef = useRef<Awaited<ReturnType<typeof getSocket>> | null>(null);
-  const location = useLocation();
-
-  useEffect(() => {
-    if (!dbUser) return;
-    socialService.getUnreadNotificationCount().then(setCount).catch(() => {});
-    let mounted = true;
-    getSocket().then((socket) => {
-      if (!mounted) return;
-      socketRef.current = socket;
-      socket.on('notification:new', () => setCount((n) => n + 1));
-    });
-    return () => { mounted = false; socketRef.current?.off('notification:new'); };
-  }, [dbUser]);
-
-  useEffect(() => {
-    if (location.pathname === '/notifications') setCount(0);
-  }, [location.pathname]);
-
-  return count;
-}
+import SaveButton from '../components/social/SaveButton';
 
 export default function HomeFeed() {
   const navigate = useNavigate();
@@ -137,11 +112,11 @@ export default function HomeFeed() {
   const promptOffset = dailyPrompt ? 1 : 0;
 
   return (
-    <div className="relative h-screen bg-[#050508] overflow-hidden">
+    <div className="relative h-screen bg-[#050508] overflow-hidden lg:pl-[220px]">
 
-      {/* Fixed header */}
-      <div className="fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
-        <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
+      {/* Fixed header — redundant with the desktop sidebar (brand/notifications/create), mobile only */}
+      <div className="fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3 lg:hidden">
+        <span className="text-white font-bold text-lg tracking-tight">Vipi</span>
         <div className="flex items-center gap-1">
           <button onClick={() => navigate('/notifications')} className="relative p-2">
             <Bell className="w-5 h-5 text-white/80" />
@@ -150,6 +125,12 @@ export default function HomeFeed() {
                 {notifCount > 99 ? '99+' : notifCount}
               </span>
             )}
+          </button>
+          <button onClick={() => navigate('/marketplace')} className="p-2">
+            <ShoppingBag className="w-5 h-5 text-white/80" />
+          </button>
+          <button onClick={() => navigate('/night-out')} className="p-2">
+            <PartyPopper className="w-5 h-5 text-white/80" />
           </button>
           <button onClick={() => navigate('/create')} className="p-2">
             <PlusSquare className="w-5 h-5 text-white/80" />
@@ -324,6 +305,8 @@ function PostSlide({
         {/* Action buttons — RIGHT of card, bottom-aligned */}
         <div className="flex flex-col items-center gap-5 pb-5 flex-none">
           <ReactionBar post={post} onChange={onChange} variant="rail" />
+
+          <SaveButton post={post} onChange={onChange} variant="rail" />
 
           <button onClick={onReply} className="flex flex-col items-center gap-1.5">
             <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">

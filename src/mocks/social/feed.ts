@@ -18,6 +18,8 @@ export const MOCK_FEED_POSTS: SocialPost[] = [
     reactions: { '🔥': 12, '👍': 4 },
     reactionCount: reactionCount({ '🔥': 12, '👍': 4 }),
     viewerReactions: [],
+    saveCount: 7,
+    isSaved: false,
     createdAt: hoursAgo(2),
   },
   {
@@ -31,6 +33,8 @@ export const MOCK_FEED_POSTS: SocialPost[] = [
     reactions: { '🎸': 3 },
     reactionCount: reactionCount({ '🎸': 3 }),
     viewerReactions: ['🎸'],
+    saveCount: 3,
+    isSaved: true,
     createdAt: hoursAgo(5),
   },
   {
@@ -44,6 +48,8 @@ export const MOCK_FEED_POSTS: SocialPost[] = [
     reactions: {},
     reactionCount: 0,
     viewerReactions: [],
+    saveCount: 0,
+    isSaved: false,
     createdAt: hoursAgo(9),
   },
   {
@@ -57,6 +63,8 @@ export const MOCK_FEED_POSTS: SocialPost[] = [
     reactions: { '💥': 21, '🔥': 8, '👍': 2 },
     reactionCount: reactionCount({ '💥': 21, '🔥': 8, '👍': 2 }),
     viewerReactions: [],
+    saveCount: 15,
+    isSaved: false,
     createdAt: hoursAgo(20),
   },
   {
@@ -70,6 +78,8 @@ export const MOCK_FEED_POSTS: SocialPost[] = [
     reactions: { '👍': 1 },
     reactionCount: reactionCount({ '👍': 1 }),
     viewerReactions: [],
+    saveCount: 1,
+    isSaved: false,
     createdAt: hoursAgo(30),
   },
 ];

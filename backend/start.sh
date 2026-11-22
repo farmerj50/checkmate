@@ -1,5 +1,6 @@
 #!/bin/sh
-echo "Running prisma db push..."
-npx prisma db push --accept-data-loss --skip-generate || echo "prisma db push failed, continuing..."
+set -eu
+echo "Applying database migrations..."
+npx prisma migrate deploy
 echo "Starting server..."
-exec npx tsx src/server.ts
+exec node dist/server.js
