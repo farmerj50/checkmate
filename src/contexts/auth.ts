@@ -7,8 +7,10 @@ interface AuthContextValue {
   dbUser: User | null;
   loading: boolean;
   needsOnboarding: boolean;
+  profileChecked: boolean;
+  profileError: { code: string; message: string } | null;
   signInWithEmail: (email: string, password: string) => Promise<User>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<User | null>;
   signInWithGoogle: (intent?: 'login' | 'signup', emailHint?: string) => Promise<User | null>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;

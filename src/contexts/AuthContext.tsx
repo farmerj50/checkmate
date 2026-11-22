@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, ReactNode } from 'react';
 import {
   User as FirebaseUser,
   signInWithEmailAndPassword,
@@ -14,6 +14,7 @@ import { api } from '../lib/api';
 import { disconnectSocket } from '../lib/socket';
 import type { User } from '../types';
 import { AuthContext } from './auth';
+import { errorField, errorMessage } from '../utils/errors';
 
 // Minimal fake FirebaseUser for demo mode — the app only reads .uid and .email
 const DEMO_TOKEN_KEY = 'demo_token';
@@ -65,17 +66,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [dbUser, setDbUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [checkedUid, setCheckedUid] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<{ code: string; message: string } | null>(null);
+  const profileLookup = useRef<{ uid: string; promise: Promise<User | null> } | null>(null);
 
-  const fetchDbUser = useCallback(async () => {
-    const data = await api.get<{ user: User | null }>('/auth/me');
-    setDbUser(data.user);
-    return data.user;
+  const fetchDbUser = useCallback((account?: FirebaseUser) => {
+    const currentUid = () => isDemoMode ? localStorage.getItem(DEMO_TOKEN_KEY) : auth.currentUser?.uid;
+    const uid = account?.uid ?? currentUid();
+    if (!uid) return Promise.reject(new Error('Sign in to load your profile.'));
+    // The Firebase listener and sign-in handler share one lookup for this session.
+    if (profileLookup.current?.uid === uid) return profileLookup.current.promise;
+    setCheckedUid(null);
+    setProfileError(null);
+    const lookup = { uid, promise: null as unknown as Promise<User | null> };
+    profileLookup.current = lookup;
+    lookup.promise = api.get<{ user: User | null }>('/auth/me').then(data => {
+      if (profileLookup.current === lookup && currentUid() === uid) {
+        setDbUser(data.user);
+        setCheckedUid(uid);
+      }
+      return data.user;
+    }).catch((error: unknown) => {
+      if (profileLookup.current === lookup && currentUid() === uid) {
+        setDbUser(null);
+        setProfileError({
+          code: String(errorField(error, 'code') ?? 'auth/profile-unavailable'),
+          message: errorMessage(error, 'We could not check your profile. Please try again.'),
+        });
+      }
+      throw error;
+    }).finally(() => {
+      if (profileLookup.current === lookup) profileLookup.current = null;
+    });
+    return lookup.promise;
   }, []);
 
   const clearDemoSession = () => {
     disconnectSocket();
     localStorage.removeItem(DEMO_TOKEN_KEY);
     localStorage.removeItem(DEMO_EMAIL_KEY);
+    profileLookup.current = null;
+    setCheckedUid(null);
+    setProfileError(null);
     setFirebaseUser(null);
     setDbUser(null);
   };
@@ -87,6 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(DEMO_EMAIL_KEY, normalizedEmail);
     const demoUser = makeDemoFirebaseUser(token, normalizedEmail);
     setFirebaseUser(demoUser);
+    setDbUser(null);
+    setCheckedUid(null);
+    setProfileError(null);
     return demoUser;
   };
 
@@ -106,10 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (token) {
         setFirebaseUser(makeDemoFirebaseUser(token, localStorage.getItem(DEMO_EMAIL_KEY)));
         fetchDbUser()
-          .then((user) => setDbUser(user))
-          .catch(() => {
-            setDbUser(null);
-          })
+          .catch(() => { /* The lookup records the recovery state. */ })
           .finally(() => setLoading(false));
       } else {
         setLoading(false);
@@ -118,89 +150,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setLoading(true);
       setFirebaseUser(user);
       if (user) {
         try {
-          await fetchDbUser();
+          await fetchDbUser(user);
           registerFcmToken();
         } catch {
-          await signOut(auth).catch(() => null);
-          setFirebaseUser(null);
-          setDbUser(null);
+          // Keep the session so the profile recovery screen can offer retry/sign-out.
+          // A failed lookup never means this account needs registration.
         }
       } else {
+        profileLookup.current = null;
         disconnectSocket();
         setDbUser(null);
+        setCheckedUid(null);
+        setProfileError(null);
       }
-      setLoading(false);
+      if (auth.currentUser?.uid === user?.uid) setLoading(false);
     });
     return unsubscribe;
   }, [fetchDbUser]);
 
   const signInWithEmail = async (email: string, password: string) => {
     if (isDemoMode) {
-      startDemoSession(email);
-      try {
-        return requireExistingProfile(await fetchDbUser());
-      } catch (err) {
-        if ((err as { code?: string })?.code !== 'auth/no-profile') {
-          clearDemoSession();
-        }
-        throw err;
-      }
+      return requireExistingProfile(await fetchDbUser(startDemoSession(email)));
     }
-    await signInWithEmailAndPassword(auth, email, password);
-    try {
-      return requireExistingProfile(await fetchDbUser());
-    } catch (err) {
-      if ((err as { code?: string })?.code !== 'auth/no-profile') {
-        await signOut(auth).catch(() => null);
-        setFirebaseUser(null);
-        setDbUser(null);
-      }
-      throw err;
-    }
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    return requireExistingProfile(await fetchDbUser(credential.user));
   };
 
   const signUpWithEmail = async (email: string, password: string) => {
     if (isDemoMode) {
-      startDemoSession(email);
-      setDbUser(null); // triggers onboarding
-      return;
+      return fetchDbUser(startDemoSession(email));
     }
-    await createUserWithEmailAndPassword(auth, email, password);
-    setDbUser(null);
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    return fetchDbUser(credential.user);
   };
 
   const signInWithGoogle = async (intent: 'login' | 'signup' = 'login', emailHint?: string) => {
     if (isDemoMode) {
-      startDemoSession(emailHint || localStorage.getItem(DEMO_EMAIL_KEY) || 'google@vipi.demo');
-      try {
-        const user = await fetchDbUser();
-        if (intent === 'login') requireExistingProfile(user);
-        return user;
-      } catch (err) {
-        if ((err as { code?: string })?.code !== 'auth/no-profile') {
-          clearDemoSession();
-        }
-        throw err;
-      }
+      const account = startDemoSession(emailHint || localStorage.getItem(DEMO_EMAIL_KEY) || 'google@vipi.demo');
+      const user = await fetchDbUser(account);
+      if (intent === 'login') requireExistingProfile(user);
+      return user;
     }
     const provider = new GoogleAuthProvider();
     const credential = await signInWithPopup(auth, provider);
     setFirebaseUser(credential.user);
-    try {
-      const user = await fetchDbUser();
-      if (intent === 'login') requireExistingProfile(user);
-      return user;
-    } catch (err) {
-      if ((err as { code?: string })?.code !== 'auth/no-profile') {
-        await signOut(auth).catch(() => null);
-        setFirebaseUser(null);
-        setDbUser(null);
-      }
-      throw err;
-    }
+    const user = await fetchDbUser(credential.user);
+    if (intent === 'login') requireExistingProfile(user);
+    return user;
   };
 
   const logout = async () => {
@@ -209,6 +209,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearDemoSession();
     } else {
       await signOut(auth);
+      profileLookup.current = null;
+      setCheckedUid(null);
+      setProfileError(null);
       setFirebaseUser(null);
       setDbUser(null);
     }
@@ -225,11 +228,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshDbUser = fetchDbUser;
 
   const completeOnboarding = (user: User) => {
+    profileLookup.current = null;
     setDbUser(user);
+    setCheckedUid(firebaseUser?.uid ?? null);
+    setProfileError(null);
   };
 
-  // True when logged in via Firebase but no DB profile yet
-  const needsOnboarding = !!firebaseUser && !dbUser && !loading;
+  // Onboarding requires a successful lookup for this exact sign-in identity.
+  const profileChecked = !!firebaseUser && checkedUid === firebaseUser.uid;
+  const needsOnboarding = profileChecked && !dbUser && !loading && !profileError;
 
   return (
     <AuthContext.Provider
@@ -238,6 +245,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         dbUser,
         loading,
         needsOnboarding,
+        profileChecked,
+        profileError,
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,

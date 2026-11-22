@@ -1,9 +1,10 @@
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import { birthDateError, isSignupEmail, validateOnboarding } from '../../src/utils/onboarding';
 
-const db = vi.hoisted(() => ({ user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() } }));
+const db = vi.hoisted(() => ({ user: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() } }));
 vi.mock('../src/lib/prisma', () => ({ prisma: db }));
 vi.mock('../src/lib/geocoding', () => ({ geocodeLocation: vi.fn().mockResolvedValue(null) }));
 import authRouter from '../src/routes/auth';
@@ -25,7 +26,59 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-22T12:00:00Z'));
   vi.clearAllMocks();
   db.user.findUnique.mockResolvedValue(null);
+  db.user.findFirst.mockResolvedValue(null);
   db.user.create.mockImplementation(async ({ data }) => ({ id: 'registration-fixture', ...data }));
+});
+
+describe('Registration identity conflicts', () => {
+  function uniqueConflict(target: string[]) {
+    return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002', clientVersion: 'test', meta: { modelName: 'User', target },
+    });
+  }
+
+  it('stops a known email conflict before attempting to create another profile', async () => {
+    db.user.findFirst.mockResolvedValueOnce({ id: 'private-existing-profile' });
+    const res = await register();
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('auth/profile-conflict');
+    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(JSON.stringify(res.body)).not.toContain('private-existing-profile');
+  });
+
+  it('returns a recoverable conflict without linking or exposing the existing account', async () => {
+    db.user.create.mockRejectedValueOnce(uniqueConflict(['email']));
+    const res = await register();
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('auth/profile-conflict');
+    expect(res.body.error).toContain('original sign-in');
+    expect(res.body.user).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain(profile.email);
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(db.user.findUnique).toHaveBeenLastCalledWith({ where: { firebaseUid: 'demo_registration_test' } });
+  });
+
+  it.each(['firebaseUid', 'email'])('returns the same profile when concurrent registration conflicts on %s', async field => {
+    const existing = { id: 'existing-profile', firebaseUid: 'demo_registration_test', ...profile };
+    db.user.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+    db.user.create.mockRejectedValueOnce(uniqueConflict([field]));
+    const res = await register({ firstName: 'Must not overwrite existing profile' });
+    expect(res.status).toBe(200);
+    expect(res.body.user).toEqual(existing);
+    expect(db.user.update).not.toHaveBeenCalled();
+  });
+
+  it('does not misreport unrelated database constraints as an identity conflict', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      db.user.create.mockRejectedValueOnce(uniqueConflict(['stripeCustomerId']));
+      const res = await register();
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Registration failed' });
+      expect(db.user.findUnique).toHaveBeenCalledTimes(1);
+    } finally { log.mockRestore(); }
+  });
 });
 afterEach(() => vi.useRealTimers());
 

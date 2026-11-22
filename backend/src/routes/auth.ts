@@ -1,11 +1,24 @@
 import express from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { authenticateToken, AuthenticatedRequest, demoAuthEnabled } from '../middleware/auth';
 import { ageInYears } from '../lib/profiles';
 import { geocodeLocation } from '../lib/geocoding';
 
 const router = express.Router();
+const profileConflict = {
+  code: 'auth/profile-conflict',
+  error: 'A profile already uses this email with a different sign-in. Use your original sign-in or contact support to reconnect your profile.',
+};
+
+async function emailHasProfile(email: string) {
+  // Only inspect the authenticated email; never return the other profile's data.
+  return !!await prisma.user.findFirst({
+    where: { email: { equals: email.trim(), mode: 'insensitive' } },
+    select: { id: true },
+  });
+}
 
 const RegisterSchema = z.object({
   userData: z.object({
@@ -66,32 +79,52 @@ router.post('/register', authenticateToken, async (req: AuthenticatedRequest, re
 
     let user = await prisma.user.findUnique({ where: { firebaseUid } });
 
+    if (!user && await emailHasProfile(email)) {
+      // Another request may have just finished registering this same identity.
+      user = await prisma.user.findUnique({ where: { firebaseUid } });
+      if (!user) return res.status(409).json(profileConflict);
+    }
     if (!user) {
       // Geocode location on registration
       const coords = await geocodeLocation(userData.location);
 
-      user = await prisma.user.create({
-        data: {
-          firebaseUid,
-          email,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          dateOfBirth: new Date(userData.dateOfBirth),
-          gender: userData.gender,
-          location: userData.location,
-          ...(coords ?? {}),
-          bio: userData.bio,
-          occupation: userData.occupation,
-          education: userData.education,
-          height: userData.height,
-          profilePictures: userData.profilePictures ?? [],
-          interests: userData.interests ?? [],
-          lookingFor: userData.lookingFor,
-          ageRangeMin: userData.ageRangeMin ?? 18,
-          ageRangeMax: userData.ageRangeMax ?? 99,
-          maxDistance: userData.maxDistance ?? 50,
-        },
-      });
+      try {
+        user = await prisma.user.create({
+          data: {
+            firebaseUid,
+            email,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            dateOfBirth: new Date(userData.dateOfBirth),
+            gender: userData.gender,
+            location: userData.location,
+            ...(coords ?? {}),
+            bio: userData.bio,
+            occupation: userData.occupation,
+            education: userData.education,
+            height: userData.height,
+            profilePictures: userData.profilePictures ?? [],
+            interests: userData.interests ?? [],
+            lookingFor: userData.lookingFor,
+            ageRangeMin: userData.ageRangeMin ?? 18,
+            ageRangeMax: userData.ageRangeMax ?? 99,
+            maxDistance: userData.maxDistance ?? 50,
+          },
+        });
+      } catch (error) {
+        const target = error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+          ? error.meta?.target : undefined;
+        if (!Array.isArray(target) || !target.some(field => field === 'email' || field === 'firebaseUid')) {
+          throw error;
+        }
+
+        // A repeated/concurrent request may have already created this identity's profile.
+        // Never recover by email: another Firebase identity must not gain access to it.
+        user = await prisma.user.findUnique({ where: { firebaseUid } });
+        if (!user) {
+          return res.status(409).json(profileConflict);
+        }
+      }
     } else {
       // Update lastActive on login
       user = await prisma.user.update({
@@ -110,9 +143,13 @@ router.post('/register', authenticateToken, async (req: AuthenticatedRequest, re
 // Check if a user profile exists for the authenticated firebase uid
 router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { firebaseUid: req.user!.uid },
     });
+    if (!user && req.user!.email && await emailHasProfile(req.user!.email)) {
+      user = await prisma.user.findUnique({ where: { firebaseUid: req.user!.uid } });
+      if (!user) return res.status(409).json(profileConflict);
+    }
     res.json({ user });
   } catch (error) {
     console.error('Get me error:', error);

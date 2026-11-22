@@ -25,8 +25,8 @@ export default function Signup() {
     if (!isDemoMode && password !== confirm) { toast.error('Passwords do not match'); return; }
     setLoading(true);
     try {
-      await signUpWithEmail(email.trim(), password);
-      navigate('/onboarding');
+      const user = await signUpWithEmail(email.trim(), password);
+      navigate(user ? '/home' : '/onboarding');
     } catch (err: unknown) {
       const code = errorField(err, 'code') ?? '';
       toast.error(

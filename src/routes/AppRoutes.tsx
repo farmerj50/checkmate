@@ -11,6 +11,7 @@ import { lazy, Suspense } from 'react';
  */
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../contexts/auth';
+import AuthProfileIssue from '../components/AuthProfileIssue';
 const Landing = lazy(() => import('../pages/Landing'));
 const Login = lazy(() => import('../pages/Login'));
 const Signup = lazy(() => import('../pages/Signup'));
@@ -48,24 +49,30 @@ function AuthLoading() {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, loading, needsOnboarding } = useAuth();
+  const { firebaseUser, loading, dbUser, profileChecked, profileError } = useAuth();
   if (loading) return <AuthLoading />;
-  if (firebaseUser && !needsOnboarding) return <Navigate to="/home" replace />;
+  if (firebaseUser && profileError) return <AuthProfileIssue />;
+  if (firebaseUser && !profileChecked) return <AuthLoading />;
+  if (firebaseUser && dbUser) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, loading, needsOnboarding } = useAuth();
+  const { firebaseUser, loading, needsOnboarding, profileChecked, profileError } = useAuth();
   if (loading) return <AuthLoading />;
   if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (profileError) return <AuthProfileIssue />;
+  if (!profileChecked) return <AuthLoading />;
   if (needsOnboarding) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
 }
 
 function OnboardingRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, dbUser: _dbUser, loading } = useAuth();
+  const { firebaseUser, dbUser: _dbUser, loading, profileChecked, profileError } = useAuth();
   if (loading) return <AuthLoading />;
   if (!firebaseUser) return <Navigate to="/login" replace />;
+  if (profileError) return <AuthProfileIssue />;
+  if (!profileChecked) return <AuthLoading />;
   if (_dbUser) return <Navigate to="/home" replace />;
   return <>{children}</>;
 }
