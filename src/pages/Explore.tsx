@@ -1,21 +1,22 @@
 /**
  * 🔍 EXPLORE — TikTok desktop layout
- * Left sidebar (nav + search) | Center video feed | Right comments panel
- * Bottom nav is hidden on this route (Navigation.tsx returns null for /explore).
+ * Center video feed | Right video-replies panel. Nav is the shared global
+ * DesktopSidebar/Navigation (lg: sidebar, mobile: bottom nav).
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
-import { Heart, MessageCircle, UserPlus, BadgeCheck, Loader2, Volume2, VolumeX, X, Send, Search, Home, PlusSquare, Bell, Film, User } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { UserPlus, BadgeCheck, Loader2, Volume2, VolumeX, X, Search, Video as VideoIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
 import { normalizeAssetUrl } from '../utils/helpers';
-import EmojiCommentBar from '../components/EmojiCommentBar';
-import type { Post, SocialComment } from '../types';
+import { socialService, type SocialPost } from '../services/social';
+import { useAsync } from '../hooks/useAsync';
+import AsyncState from '../components/ui/AsyncState';
+import ReactionBar from '../components/social/ReactionBar';
+import ReplyRecorderModal from '../components/social/ReplyRecorderModal';
+import SaveButton from '../components/social/SaveButton';
 
-interface DiscoverPost extends Post {
-  liked: boolean;
-  count: number;
+interface DiscoverPost extends SocialPost {
   isFollowing: boolean;
 }
 
@@ -25,25 +26,28 @@ export default function Explore() {
 
   const [posts, setPosts]             = useState<DiscoverPost[]>([]);
   const [loading, setLoading]         = useState(true);
+  const [loadError, setLoadError]     = useState<Error | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [cursor, setCursor]           = useState<string | null>(null);
   const [hasMore, setHasMore]         = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted]             = useState(true);
-  const [commentPostId, setCommentPostId] = useState<string | null>(null);
+  const [repliesPostId, setRepliesPostId] = useState<string | null>(null);
   const [query, setQuery]             = useState('');
   const loaderRef = useRef<HTMLDivElement>(null);
 
   const fetchFeed = useCallback(async (cur?: string) => {
     try {
-      const params = cur ? `?discover=true&cursor=${cur}` : '?discover=true';
-      const data = await api.get<{ posts: Post[]; nextCursor: string | null }>(`/social/posts/feed${params}`);
-      const mapped: DiscoverPost[] = data.posts.map((p) => ({ ...p, liked: p.isLikedByMe, count: p.likeCount, isFollowing: false }));
+      setLoadError(null);
+      const { items, nextCursor } = await socialService.getFeed(cur);
+      const mapped: DiscoverPost[] = items.map((p) => ({ ...p, isFollowing: false }));
       if (cur) setPosts((prev) => [...prev, ...mapped]);
       else setPosts(mapped);
-      setCursor(data.nextCursor);
-      setHasMore(!!data.nextCursor && data.posts.length > 0);
-    } catch { /* silent */ }
+      setCursor(nextCursor);
+      setHasMore(!!nextCursor && items.length > 0);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err : new Error(String(err)));
+    }
   }, []);
 
   useEffect(() => { fetchFeed().finally(() => setLoading(false)); }, [fetchFeed]);
@@ -78,22 +82,14 @@ export default function Explore() {
     return () => obs.disconnect();
   }, [posts.length]);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filteredPosts = query.trim()
     ? posts.filter((p) => p.author.firstName.toLowerCase().includes(query.toLowerCase()))
     : posts;
 
-  async function toggleLike(idx: number) {
-    const post = filteredPosts[idx];
-    const next = !post.liked;
-    setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, liked: next, count: p.count + (next ? 1 : -1) } : p));
-    try { await api.post(`/social/posts/${post.id}/like`, {}); }
-    catch {
-      setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, liked: !next, count: p.count + (next ? -1 : 1) } : p));
-      toast.error('Failed to like');
-    }
+  function handlePostChange(updated: SocialPost) {
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
   }
 
   async function toggleFollow(postId: string) {
@@ -102,73 +98,38 @@ export default function Explore() {
     const next = !post.isFollowing;
     setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, isFollowing: next } : p));
     try {
-      if (next) await api.post(`/social/follow/${post.authorId}`, {});
-      else await api.delete(`/social/follow/${post.authorId}`);
-    } catch { setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, isFollowing: !next } : p)); }
+      if (next) await socialService.follow(post.authorId);
+      else await socialService.unfollow(post.authorId);
+    } catch {
+      setPosts((prev) => prev.map((p) => p.id === postId ? { ...p, isFollowing: !next } : p));
+      toast.error('Failed to update follow');
+    }
   }
 
-  const commentPost = posts.find((p) => p.id === commentPostId);
+  const repliesPost = posts.find((p) => p.id === repliesPostId);
 
   return (
-    <div className="fixed inset-0 bg-[#050508] flex">
+    <div className="fixed inset-0 bg-[#050508] flex lg:pl-[220px]">
 
-      {/* ── LEFT SIDEBAR ── */}
-      <aside className="flex-none flex flex-col bg-[#0a0a0f] relative z-10" style={{ width: 220 }}>
-        {/* Logo */}
-        <div className="px-6 py-5 flex-none">
-          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
-        </div>
+      {/* ── CENTER: SNAP VIDEO FEED ── */}
+      <div className="flex-1 relative overflow-hidden">
 
-        {/* Rectangular search bar — clicking opens nav */}
-        <div className="px-4 pb-3 flex-none relative">
+        {/* Search — was in the page's own sidebar; now floats over the feed
+            since navigation is the shared global sidebar/bottom-nav. */}
+        <div className="absolute top-4 left-4 z-20 w-64 max-w-[calc(100%-2rem)]">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
             <input
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setSidebarOpen(true)}
-              onBlur={() => setTimeout(() => setSidebarOpen(false), 150)}
               placeholder="Search…"
               autoComplete="off"
-              className="w-full bg-white/6 border border-white/10 rounded-md pl-9 pr-3 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-[#ff4d8d]/40 [color-scheme:dark]"
+              className="w-full bg-black/50 backdrop-blur-md border border-white/10 rounded-full pl-9 pr-3 py-2 text-white text-sm placeholder-white/40 focus:outline-none focus:border-[#ff4d8d]/40 [color-scheme:dark]"
             />
           </div>
         </div>
 
-        {/* Nav links — always visible */}
-        <AnimatePresence>
-          {(sidebarOpen || !query) && (
-            <motion.nav
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.15 }}
-              className="flex-1 px-3 space-y-1"
-            >
-              {[
-                { to: '/home',          icon: Home,       label: 'Home' },
-                { to: '/explore',       icon: Search,     label: 'Explore' },
-                { to: '/create',        icon: PlusSquare, label: 'Create' },
-                { to: '/matches',       icon: Heart,      label: 'Matches' },
-                { to: '/notifications', icon: Bell,       label: 'Alerts' },
-                { to: '/studio',        icon: Film,       label: 'Studio' },
-                { to: '/profile',       icon: User,       label: 'Profile' },
-              ].map(({ to, icon: Icon, label }) => (
-                <NavLink key={to} to={to} className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
-                }>
-                  <Icon className="w-5 h-5 flex-none" />
-                  {label}
-                </NavLink>
-              ))}
-            </motion.nav>
-          )}
-        </AnimatePresence>
-      </aside>
-
-      {/* ── CENTER: SNAP VIDEO FEED ── */}
-      <div className="flex-1 relative overflow-hidden">
         <div
           ref={containerRef}
           className="h-full overflow-y-scroll"
@@ -177,6 +138,13 @@ export default function Explore() {
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="w-8 h-8 text-[#ff4d8d] animate-spin" />
+            </div>
+          ) : loadError ? (
+            <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-8">
+              <p className="text-white/40 text-sm">Couldn't load posts.</p>
+              <button onClick={() => { setLoading(true); fetchFeed().finally(() => setLoading(false)); }} className="text-[#ff4d8d] text-sm font-semibold">
+                Try again
+              </button>
             </div>
           ) : filteredPosts.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-8">
@@ -189,10 +157,10 @@ export default function Explore() {
               idx={idx}
               isActive={idx === activeIndex}
               muted={muted}
-              commentOpen={commentPostId === post.id}
+              repliesOpen={repliesPostId === post.id}
               onMuteToggle={() => setMuted((m) => !m)}
-              onLike={() => toggleLike(idx)}
-              onComment={() => setCommentPostId(commentPostId === post.id ? null : post.id)}
+              onChange={handlePostChange}
+              onReply={() => setRepliesPostId(repliesPostId === post.id ? null : post.id)}
               onFollow={() => toggleFollow(post.id)}
               onProfile={() => navigate(`/profile/${post.authorId}`)}
             />
@@ -205,18 +173,18 @@ export default function Explore() {
         </div>
       </div>
 
-      {/* ── RIGHT: COMMENTS PANEL ── */}
+      {/* ── RIGHT: VIDEO REPLIES PANEL ── */}
       <AnimatePresence>
-        {commentPost && (
+        {repliesPost && (
           <motion.aside
-            key="comments"
+            key="replies"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 360, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ type: 'spring', damping: 28, stiffness: 300 }}
             className="flex-none flex flex-col bg-[#0a0a0f] border-l border-white/8 overflow-hidden"
           >
-            <CommentPanel postId={commentPost.id} onClose={() => setCommentPostId(null)} />
+            <RepliesPanel postId={repliesPost.id} onClose={() => setRepliesPostId(null)} />
           </motion.aside>
         )}
       </AnimatePresence>
@@ -232,17 +200,17 @@ interface VideoSlideProps {
   idx: number;
   isActive: boolean;
   muted: boolean;
-  commentOpen: boolean;
+  repliesOpen: boolean;
   onMuteToggle: () => void;
-  onLike: () => void;
-  onComment: () => void;
+  onChange: (updated: SocialPost) => void;
+  onReply: () => void;
   onFollow: () => void;
   onProfile: () => void;
 }
 
-function VideoSlide({ post, idx, isActive, muted, commentOpen, onMuteToggle, onLike, onComment, onFollow, onProfile }: VideoSlideProps) {
+function VideoSlide({ post, idx, isActive, muted, repliesOpen, onMuteToggle, onChange, onReply, onFollow, onProfile }: VideoSlideProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const media = normalizeAssetUrl(post.mediaUrl);
+  const media = normalizeAssetUrl(post.videoUrl);
   const avatar = normalizeAssetUrl(post.author.profilePictures?.[0]);
 
   useEffect(() => {
@@ -271,11 +239,7 @@ function VideoSlide({ post, idx, isActive, muted, commentOpen, onMuteToggle, onL
           className="relative bg-black rounded-2xl overflow-hidden flex-none shadow-2xl group"
           style={{ aspectRatio: '9/16', height: '100%' }}
         >
-          {post.mediaType === 'VIDEO' ? (
-            <video ref={videoRef} src={media ?? ''} className="absolute inset-0 w-full h-full object-cover" loop muted playsInline />
-          ) : (
-            <img src={media ?? ''} alt="" className="absolute inset-0 w-full h-full object-cover" />
-          )}
+          <video ref={videoRef} src={media ?? ''} className="absolute inset-0 w-full h-full object-cover" loop muted playsInline />
 
           {/* Bottom gradient */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent pointer-events-none" />
@@ -314,18 +278,15 @@ function VideoSlide({ post, idx, isActive, muted, commentOpen, onMuteToggle, onL
             <span className="text-white/60 text-[11px]">{post.isFollowing ? 'Following' : 'Follow'}</span>
           </button>
 
-          <button onClick={onLike} className="flex flex-col items-center gap-1.5">
-            <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors">
-              <Heart className={`w-5 h-5 ${post.liked ? 'text-[#ff4d8d] fill-[#ff4d8d]' : 'text-white'}`} />
-            </div>
-            <span className="text-white/60 text-[11px]">{post.count > 0 ? post.count.toLocaleString() : 'Like'}</span>
-          </button>
+          <ReactionBar post={post} onChange={onChange} variant="rail" />
 
-          <button onClick={onComment} className="flex flex-col items-center gap-1.5">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${commentOpen ? 'bg-[#ff4d8d]/20 ring-1 ring-[#ff4d8d]/40' : 'bg-white/10 hover:bg-white/20'}`}>
-              <MessageCircle className={`w-5 h-5 ${commentOpen ? 'text-[#ff4d8d]' : 'text-white'}`} />
+          <SaveButton post={post} onChange={onChange} variant="rail" />
+
+          <button onClick={onReply} className="flex flex-col items-center gap-1.5">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${repliesOpen ? 'bg-[#ff4d8d]/20 ring-1 ring-[#ff4d8d]/40' : 'bg-white/10 hover:bg-white/20'}`}>
+              <VideoIcon className={`w-5 h-5 ${repliesOpen ? 'text-[#ff4d8d]' : 'text-white'}`} />
             </div>
-            <span className="text-white/60 text-[11px]">{post.commentCount > 0 ? post.commentCount.toLocaleString() : 'Comments'}</span>
+            <span className="text-white/60 text-[11px]">{post.replyCount > 0 ? post.replyCount.toLocaleString() : 'Reply'}</span>
           </button>
         </div>
 
@@ -336,119 +297,83 @@ function VideoSlide({ post, idx, isActive, muted, commentOpen, onMuteToggle, onL
 
 /* ─────────────────────────────────────────── */
 
-function CommentPanel({ postId, onClose }: { postId: string; onClose: () => void }) {
-  const [comments, setComments]   = useState<SocialComment[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [text, setText]           = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [burstKey, setBurstKey]   = useState(0);
-  const [bursting, setBursting]   = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+/** Desktop sidebar panel version of the video-reply thread — same data, different chrome than ReplyThread's mobile sheet. */
+function RepliesPanel({ postId, onClose }: { postId: string; onClose: () => void }) {
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [localReplies, setLocalReplies] = useState<SocialPost[] | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    setComments([]);
-    api.get<{ comments: SocialComment[] }>(`/social/posts/${postId}/comments`)
-      .then((d) => setComments(d.comments))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    setTimeout(() => inputRef.current?.focus(), 300);
-  }, [postId]);
+  const { data, status, error, reload } = useAsync(() => socialService.getReplies(postId), [postId]);
+  const replies = localReplies ?? data?.items ?? [];
 
-  async function submit(content?: string) {
-    const body = content ?? text.trim();
-    if (!body || submitting) return;
-    if (!content) setText('');
-    setSubmitting(true);
-    try {
-      const { comment } = await api.post<{ comment: SocialComment }>(`/social/posts/${postId}/comments`, { content: body });
-      setComments((prev) => [comment, ...prev]);
-    } catch { /* silent */ }
-    finally { setSubmitting(false); }
+  function handleCreated(reply: SocialPost) {
+    setLocalReplies([...(localReplies ?? data?.items ?? []), reply]);
   }
 
-  function handleEmoji(emoji: string, isBurst: boolean) {
-    if (isBurst) {
-      setBurstKey((k) => k + 1);
-      setBursting(true);
-      setTimeout(() => setBursting(false), 700);
-    }
-    // Append to input OR send immediately as standalone
-    if (!text.trim()) {
-      submit(emoji);
-    } else {
-      setText((t) => t + emoji);
-      inputRef.current?.focus();
-    }
+  function handleChange(updated: SocialPost) {
+    setLocalReplies(replies.map((r) => (r.id === updated.id ? updated : r)));
   }
 
   return (
     <>
       <div className="flex items-center justify-between px-5 py-4 border-b border-white/8 flex-none">
-        <span className="text-white font-semibold">Comments</span>
+        <span className="text-white font-semibold">Video replies</span>
         <button onClick={onClose} className="p-1.5 rounded-full bg-white/8 text-white/50 hover:text-white transition-colors">
           <X className="w-4 h-4" />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 min-h-0">
-        {loading ? (
-          <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 text-[#ff4d8d] animate-spin" /></div>
-        ) : comments.length === 0 ? (
-          <p className="text-center text-white/30 text-sm py-12">No comments yet. Be the first!</p>
-        ) : comments.map((c) => {
-          const av = normalizeAssetUrl(c.author.profilePictures?.[0]);
-          return (
-            <div key={c.id} className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-white/10 flex-none overflow-hidden">
-                {av && <img src={av} alt="" className="w-full h-full object-cover" />}
+        <AsyncState
+          loading={status === 'loading'}
+          error={error}
+          empty={status === 'success' && replies.length === 0}
+          emptyMessage="No video replies yet. Be the first."
+          errorMessage="Couldn't load replies."
+          onRetry={reload}
+        >
+          {replies.map((r) => {
+            const av = normalizeAssetUrl(r.author.profilePictures?.[0]);
+            const media = normalizeAssetUrl(r.videoUrl);
+            return (
+              <div key={r.id} className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-white/10 flex-none overflow-hidden">
+                  {av && <img src={av} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-white text-xs font-semibold">{r.author.firstName}</span>
+                  <div className="mt-1.5 rounded-xl overflow-hidden bg-black aspect-[9/16] max-w-[140px]">
+                    <video src={media ?? ''} className="w-full h-full object-cover" muted loop playsInline controls />
+                  </div>
+                  <div className="mt-1.5">
+                    <div className="flex items-center gap-4">
+                      <ReactionBar post={r} onChange={handleChange} variant="inline" />
+                      <SaveButton post={r} onChange={handleChange} variant="inline" />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <span className="text-white text-xs font-semibold mr-2">{c.author.firstName}</span>
-                <span className="text-white/70 text-sm">{c.content}</span>
-                <p className="text-white/25 text-[10px] mt-1">
-                  {new Date(c.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                </p>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </AsyncState>
       </div>
 
-      {/* Quick emoji bar */}
-      <div className="border-t border-white/6 flex-none relative">
-        <EmojiCommentBar onEmoji={(emoji, burst) => handleEmoji(emoji, burst)} />
-        <AnimatePresence>
-          {bursting && (
-            <motion.div
-              key={burstKey}
-              initial={{ scale: 0.5, opacity: 1, y: 0 }}
-              animate={{ scale: 3.5, opacity: 0, y: -80 }}
-              exit={{}}
-              transition={{ duration: 0.65, ease: 'easeOut' }}
-              className="absolute left-1/2 bottom-12 -translate-x-1/2 pointer-events-none text-4xl select-none z-[999]"
-            >
-              💥
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      <div className="flex items-center gap-3 px-4 py-3 border-t border-white/8 flex-none">
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          placeholder="Add a comment…"
-          maxLength={500}
-          className="flex-1 bg-white/8 border border-white/10 rounded-full px-4 py-2.5 text-white text-sm placeholder-white/25 focus:outline-none focus:border-[#ff4d8d]/40 [color-scheme:dark]"
-        />
-        <button onClick={() => submit()} disabled={!text.trim() || submitting}
-          className="w-9 h-9 rounded-full bg-gradient-to-r from-[#ff4d8d] to-[#8b5cf6] flex items-center justify-center disabled:opacity-40 flex-none">
-          {submitting ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Send className="w-4 h-4 text-white" />}
+      <div className="p-4 border-t border-white/8 flex-none">
+        <button
+          onClick={() => setRecorderOpen(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-gradient-to-r from-[#ff4d8d] to-[#8b5cf6] text-white font-semibold text-sm"
+        >
+          <VideoIcon className="w-4 h-4" />
+          Reply with video
         </button>
       </div>
+
+      {recorderOpen && (
+        <ReplyRecorderModal
+          parentPostId={postId}
+          onClose={() => setRecorderOpen(false)}
+          onCreated={handleCreated}
+        />
+      )}
     </>
   );
 }

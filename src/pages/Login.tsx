@@ -1,9 +1,10 @@
+import { errorMessage, errorField } from '../utils/errors';
 import { useState, KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Heart, ArrowRight, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { isDemoMode } from '../lib/firebase';
 
 export default function Login() {
@@ -23,14 +24,19 @@ export default function Login() {
     try {
       await signInWithEmail(email.trim(), password);
       navigate('/home');
-    } catch (err: any) {
-      const code = err.code ?? '';
+    } catch (err: unknown) {
+      const code = errorField(err, 'code') ?? '';
+      if (code === 'auth/no-profile') {
+        toast.error('Finish setting up your Vipi profile.');
+        navigate('/onboarding');
+        return;
+      }
       toast.error(
         code === 'auth/invalid-credential' || code === 'auth/user-not-found'
           ? 'Invalid email or password.'
           : code === 'auth/too-many-requests'
           ? 'Too many attempts. Try again later.'
-          : err.message ?? 'Sign in failed.'
+          : errorMessage(err, 'Sign in failed.')
       );
     } finally {
       setLoading(false);
@@ -40,10 +46,15 @@ export default function Login() {
   const handleGoogle = async () => {
     setGoogleLoading(true);
     try {
-      await signInWithGoogle();
+      await signInWithGoogle('login', email.trim() || undefined);
       navigate('/home');
-    } catch {
-      toast.error('Google sign in failed.');
+    } catch (err: unknown) {
+      if (errorField(err, 'code') === 'auth/no-profile') {
+        toast.error('Finish setting up your Vipi profile.');
+        navigate('/onboarding');
+        return;
+      }
+      toast.error(errorMessage(err, 'Google sign in failed.'));
     } finally {
       setGoogleLoading(false);
     }
@@ -73,7 +84,7 @@ export default function Login() {
             <div className="w-10 h-10 rounded-2xl bg-pink-600 grid place-items-center shadow-lg shadow-pink-600/40">
               <Heart className="w-5 h-5 text-white" />
             </div>
-            <span className="text-white text-xl font-semibold tracking-tight">CheckMate</span>
+            <span className="text-white text-xl font-semibold tracking-tight">Vipi</span>
           </div>
         </div>
 

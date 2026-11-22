@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, Ban, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
+import { socialService, type ReportInput } from '../services/social';
 import Button from './ui/Button';
 
-const REASONS: { value: string; label: string; emoji: string }[] = [
+const REASONS: { value: ReportInput['reason']; label: string; emoji: string }[] = [
   { value: 'FAKE_PROFILE', label: 'Fake profile', emoji: '🎭' },
   { value: 'INAPPROPRIATE_CONTENT', label: 'Inappropriate photos or content', emoji: '🚫' },
   { value: 'HARASSMENT', label: 'Harassment or threats', emoji: '⚠️' },
@@ -23,7 +23,7 @@ interface Props {
 
 export default function ReportModal({ userId, userName, onClose, onBlocked }: Props) {
   const [step, setStep] = useState<'choose' | 'detail' | 'done'>('choose');
-  const [selectedReason, setSelectedReason] = useState('');
+  const [selectedReason, setSelectedReason] = useState<ReportInput['reason'] | ''>('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [blocking, setBlocking] = useState(false);
@@ -32,7 +32,10 @@ export default function ReportModal({ userId, userName, onClose, onBlocked }: Pr
     if (!selectedReason) return;
     setSubmitting(true);
     try {
-      await api.post('/safety/report', {
+      // Field shape (reportedId, reason, description) unchanged, but the route
+      // itself moved: POST /social/reports per Codex's finalized OpenAPI —
+      // handled inside ApiSocialService, not /safety/report anymore.
+      await socialService.report({
         reportedId: userId,
         reason: selectedReason,
         description: description.trim() || undefined,
@@ -48,7 +51,7 @@ export default function ReportModal({ userId, userName, onClose, onBlocked }: Pr
   const blockUser = async () => {
     setBlocking(true);
     try {
-      await api.post(`/safety/block/${userId}`, {});
+      await socialService.block(userId);
       toast.success(`${userName} has been blocked`);
       onBlocked?.();
       onClose();
@@ -65,7 +68,10 @@ export default function ReportModal({ userId, userName, onClose, onBlocked }: Pr
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4"
+        // z-[100]: must render above the persistent bottom Navigation bar
+        // (z-50) — they collided before, so taps meant for this modal's
+        // lower buttons (e.g. Submit Report) hit the nav underneath instead.
+        className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center p-4"
         onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <motion.div

@@ -9,7 +9,6 @@ import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import ReportModal from '../components/ReportModal';
-import { calculateAge } from '../utils/helpers';
 
 const LOOKING_FOR_LABELS: Record<string, string> = {
   RELATIONSHIP: 'Relationship',
@@ -22,22 +21,19 @@ interface MatchUser {
   id: string;
   firstName: string;
   lastName: string;
-  dateOfBirth: string;
+  age: number | null;
   gender: string;
-  location: string;
+  location: string | null;
   bio?: string;
   occupation?: string;
   education?: string;
   height?: number;
   interests: string[];
   lookingFor: string;
-  ageRangeMin: number;
-  ageRangeMax: number;
-  maxDistance: number;
   profileVideos: string[];
   profileVideo?: string;
   isVerified: boolean;
-  lastActive: string;
+  lastActive: string | null;
 }
 
 export default function MatchProfile() {
@@ -125,9 +121,9 @@ export default function MatchProfile() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-gray-950 flex flex-col overflow-hidden lg:pl-[220px]">
       {/* Header */}
-      <div className="fixed top-0 inset-x-0 z-30 flex items-center justify-between px-4 pt-4 pb-3">
+      <div className="fixed top-0 inset-x-0 z-30 flex items-center justify-between px-4 pt-4 pb-3 lg:pl-[220px]">
         <button
           onClick={() => navigate('/matches')}
           className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center"
@@ -234,7 +230,7 @@ export default function MatchProfile() {
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-white font-bold text-2xl">
-                        {user.firstName}, {calculateAge(user.dateOfBirth)}
+                        {user.firstName}{user.age === null ? '' : `, ${user.age}`}
                       </span>
                       {user.isVerified && <BadgeCheck className="w-5 h-5 text-blue-400" />}
                     </div>
@@ -242,7 +238,7 @@ export default function MatchProfile() {
                       <p className="text-white/70 text-sm">{user.occupation}</p>
                     )}
                     <p className="text-white/50 text-xs mt-0.5 flex items-center gap-1">
-                      <MapPin className="w-3 h-3" />{user.location}
+                      <MapPin className="w-3 h-3" />{user.location ?? 'Location hidden'}
                     </p>
                   </div>
 
@@ -286,13 +282,6 @@ export default function MatchProfile() {
                   <p className="text-white font-medium text-sm flex items-center gap-1.5">
                     <Heart className="w-3.5 h-3.5 text-pink-400" />
                     {LOOKING_FOR_LABELS[user.lookingFor] ?? user.lookingFor}
-                  </p>
-                </div>
-
-                <div className="bg-gray-900 rounded-2xl p-3">
-                  <p className="text-white/30 text-xs mb-1">Age preference</p>
-                  <p className="text-white font-medium text-sm">
-                    {user.ageRangeMin} – {user.ageRangeMax} yrs
                   </p>
                 </div>
 
@@ -345,9 +334,9 @@ export default function MatchProfile() {
               )}
 
               {/* Last active */}
-              <p className="text-white/20 text-xs">
+              {user.lastActive && <p className="text-white/20 text-xs">
                 Active {formatDistanceToNow(new Date(user.lastActive), { addSuffix: true })}
-              </p>
+              </p>}
             </div>
           </motion.div>
         )}

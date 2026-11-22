@@ -1,0 +1,708 @@
+openapi: 3.0.3
+info:
+  title: Vipi v0.1 Social API
+  version: "0.1.0"
+  description: Finalized v0.1 social integration contract for Claude. Posts are video-only; replies are Post-to-Post video replies; written comments are not supported.
+servers:
+  - url: http://localhost:5001
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID token
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    AuthorSummary:
+      type: object
+      required: [id, firstName, profilePictures, isVerified]
+      properties:
+        id:
+          type: string
+        firstName:
+          type: string
+        profilePictures:
+          type: array
+          items:
+            type: string
+        isVerified:
+          type: boolean
+        profileVideo:
+          type: string
+          nullable: true
+    Post:
+      type: object
+      required: [id, authorId, author, videoUrl, reactionCount, reactions, viewerReactions, saveCount, isSaved, replyCount, parentPostId, createdAt]
+      properties:
+        id:
+          type: string
+        authorId:
+          type: string
+        author:
+          $ref: "#/components/schemas/AuthorSummary"
+        videoUrl:
+          type: string
+          format: uri
+        thumbnailUrl:
+          type: string
+          format: uri
+          nullable: true
+        caption:
+          type: string
+          nullable: true
+        reactionCount:
+          type: integer
+          minimum: 0
+          description: Total number of persisted reaction records for this post.
+        reactions:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          description: Aggregate reaction counts keyed by emoji.
+          example:
+            "\U0001F525": 4
+            "\U0001F602": 2
+            "\u2764\uFE0F": 2
+        viewerReactions:
+          type: array
+          description: Emojis the authenticated viewer has applied to this post.
+          items:
+            type: string
+          example: ["\U0001F525"]
+        saveCount:
+          type: integer
+          minimum: 0
+          description: Total number of persisted save records for this post.
+        isSaved:
+          type: boolean
+          description: Whether the authenticated viewer has saved this post.
+        replyCount:
+          type: integer
+          minimum: 0
+        parentPostId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    CreatePostRequest:
+      type: object
+      required: [videoUrl]
+      additionalProperties: true
+      properties:
+        videoUrl:
+          type: string
+          format: uri
+        thumbnailUrl:
+          type: string
+          format: uri
+          nullable: true
+        caption:
+          type: string
+          maxLength: 500
+          nullable: true
+        parentPostId:
+          type: string
+          nullable: true
+    CreatePostResponse:
+      type: object
+      required: [post]
+      properties:
+        post:
+          $ref: "#/components/schemas/Post"
+    PaginatedPostsResponse:
+      type: object
+      required: [posts, nextCursor]
+      properties:
+        posts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque post id cursor. Pass it back as cursor on the next request.
+    PaginatedRepliesResponse:
+      type: object
+      required: [replies, nextCursor]
+      properties:
+        replies:
+          type: array
+          items:
+            $ref: "#/components/schemas/Post"
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque reply post id cursor. Pass it back as cursor on the next request.
+    ReactionRequest:
+      type: object
+      required: [emoji]
+      properties:
+        emoji:
+          type: string
+          minLength: 1
+    ReactionResponse:
+      type: object
+      required: [reacted, count]
+      properties:
+        reacted:
+          type: boolean
+        count:
+          type: integer
+          minimum: 0
+    SaveResponse:
+      type: object
+      required: [saved, count]
+      properties:
+        saved:
+          type: boolean
+        count:
+          type: integer
+          minimum: 0
+    FollowResponse:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+    BlockResponse:
+      type: object
+      required: [blocked]
+      properties:
+        blocked:
+          type: boolean
+    FollowStatusResponse:
+      type: object
+      required: [isFollowing, followerCount, followingCount]
+      properties:
+        isFollowing:
+          type: boolean
+        followerCount:
+          type: integer
+        followingCount:
+          type: integer
+    ReportRequest:
+      type: object
+      required: [reportedId, reason]
+      properties:
+        reportedId:
+          type: string
+        reason:
+          type: string
+          enum: [INAPPROPRIATE_CONTENT, HARASSMENT, FAKE_PROFILE, SPAM, UNDERAGE, OTHER]
+        description:
+          type: string
+          maxLength: 1000
+    Report:
+      type: object
+      required: [id, reporterId, reportedId, reason, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        reporterId:
+          type: string
+        reportedId:
+          type: string
+        reason:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ReportResponse:
+      type: object
+      required: [report]
+      properties:
+        report:
+          $ref: "#/components/schemas/Report"
+    UploadPostMediaResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+    SuccessResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+security:
+  - bearerAuth: []
+paths:
+  /api/upload/post-media:
+    post:
+      summary: Upload video media for a social post
+      description: Accepts video MIME types only and returns a local media URL for use as CreatePostRequest.videoUrl.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [media]
+              properties:
+                media:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadPostMediaResponse"
+        "400":
+          description: Missing or non-video media
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/social/posts:
+    post:
+      summary: Create a top-level video post or a video reply
+      description: The authenticated user is always the author. Client-supplied authorId is ignored. Supplying parentPostId creates a video reply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePostRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatePostResponse"
+        "400":
+          description: Invalid request or invalid parentPostId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing bearer token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Block relationship prevents reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/social/posts/{postId}:
+    get:
+      summary: Get one visible post
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatePostResponse"
+        "403":
+          description: Block relationship prevents access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Missing or soft-deleted post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Soft-delete a post owned by the authenticated user
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Not owner or post not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/social/posts/saved:
+    get:
+      summary: Get videos saved by the authenticated user
+      description: Returns visible, non-deleted saved posts. Posts hidden by either side of a block relationship are excluded.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Opaque saved-post id cursor. Pass it back as cursor on the next request.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: Saved post page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedPostsResponse"
+  /api/social/posts/{postId}/replies:
+    get:
+      summary: Get video replies for a post
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: Reply page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRepliesResponse"
+        "404":
+          description: Missing or soft-deleted parent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/social/posts/feed:
+    get:
+      summary: Get the authenticated user's video feed
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Feed page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedPostsResponse"
+  /api/social/posts/user/{userId}:
+    get:
+      summary: Get a user's visible profile video feed
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: Profile post page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedPostsResponse"
+  /api/social/posts/{postId}/reactions:
+    post:
+      summary: Set an emoji reaction idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactionRequest"
+      responses:
+        "200":
+          description: Reaction is set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionResponse"
+        "403":
+          description: Block relationship prevents reaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Missing or soft-deleted post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Clear an emoji reaction idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactionRequest"
+      responses:
+        "200":
+          description: Reaction is cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionResponse"
+  /api/social/posts/{postId}/save:
+    post:
+      summary: Save a video post idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Post is saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveResponse"
+        "403":
+          description: Block relationship prevents saving
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Missing or soft-deleted post
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Unsave a video post idempotently
+      parameters:
+        - name: postId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Post is no longer saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaveResponse"
+  /api/social/follow/{userId}:
+    post:
+      summary: Follow a user idempotently
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Following
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowResponse"
+        "400":
+          description: Self-follow rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Block relationship prevents follow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Unfollow a user idempotently
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Not following
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowResponse"
+  /api/social/block/{userId}:
+    post:
+      summary: Block a user idempotently
+      description: Blocking removes follow relationships in both directions.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Blocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockResponse"
+        "400":
+          description: Self-block rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Unblock a user idempotently
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Unblocked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockResponse"
+  /api/social/reports:
+    post:
+      summary: Report a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportRequest"
+      responses:
+        "201":
+          description: Report created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+        "400":
+          description: Invalid request or self-report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reported user not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/social/followers:
+    get:
+      summary: List followers for the authenticated user
+      responses:
+        "200":
+          description: Followers
+  /api/social/following:
+    get:
+      summary: List users followed by the authenticated user
+      responses:
+        "200":
+          description: Following
+  /api/social/users/{userId}/follow-status:
+    get:
+      summary: Get follow status and counts for a user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Follow status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowStatusResponse"

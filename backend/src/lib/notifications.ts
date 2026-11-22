@@ -1,4 +1,5 @@
-import admin from 'firebase-admin';
+import { getApp, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 import { prisma } from './prisma';
 
 interface NotificationPayload {
@@ -13,7 +14,7 @@ interface NotificationPayload {
  */
 export async function sendPushToUser(userId: string, payload: NotificationPayload) {
   // Only send if Firebase Admin is active
-  if (!admin.apps.length || !admin.app().options.projectId) return;
+  if (!getApps().length || !getApp().options.projectId) return;
 
   try {
     const user = await prisma.user.findUnique({
@@ -22,7 +23,7 @@ export async function sendPushToUser(userId: string, payload: NotificationPayloa
     });
     if (!user?.fcmToken) return;
 
-    await admin.messaging().send({
+    await getMessaging().send({
       token: user.fcmToken,
       notification: { title: payload.title, body: payload.body },
       data: payload.data,

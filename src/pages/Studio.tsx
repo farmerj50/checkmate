@@ -1,18 +1,20 @@
+import { errorMessage } from '../utils/errors';
 /**
- * 🎬 STUDIO — Video/Image upload + AI content creation assistant
- * Layout: Left sidebar | Center tabs (Video / Images / Script) | Right AI panel
+ * 🎬 STUDIO — Video upload + AI content creation assistant
+ * Layout: Left sidebar | Center tabs (Video / Script) | Right AI panel
+ * Video-only for v0.1 — Codex's finalized Post contract has no image-post path.
  */
 import { useState, useRef, useCallback } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Home, Search, PlusSquare, Heart, Bell, Upload, Sparkles,
-  Send, Loader2, X, Video, Film, Wand2, Hash, FileText,
-  Image as ImageIcon, Zap, Plus, Check, User,
+  Upload, Sparkles,
+  Send, Loader2, X, Video, Wand2, Hash, FileText,
+  Image as ImageIcon, Zap, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
-import { auth } from '../lib/firebase';
+import { api, getAccessToken } from '../lib/api';
+import { socialService } from '../services/social';
 
 interface ChatMessage {
   role: 'user' | 'ai';
@@ -20,15 +22,15 @@ interface ChatMessage {
   scriptContent?: string;
 }
 
-type CenterTab = 'video' | 'images' | 'script';
+type CenterTab = 'video' | 'script';
 
 const QUICK_PROMPTS = [
-  { icon: Sparkles,  label: 'Create concept', msg: 'Create a complete video concept for my CheckMate dating profile video. Include: a powerful hook for the first 3 seconds, main content idea, and CTA. Make it authentic and engaging.' },
+  { icon: Sparkles,  label: 'Create concept', msg: 'Create a complete video concept for my Vipi dating profile video. Include: a powerful hook for the first 3 seconds, main content idea, and CTA. Make it authentic and engaging.' },
   { icon: FileText,  label: 'Write script',   msg: 'Write a complete 30-second video script with timing marks (e.g. [0-3s]), dialogue or voiceover text, and visual directions for each segment.' },
   { icon: ImageIcon, label: 'Picture ideas',  msg: 'Suggest 6 specific photo or B-roll scene ideas I should capture to complement my video. Be specific about angles, lighting, and what to show.' },
   { icon: Zap,       label: 'Improve it',     msg: 'Analyze my current content and caption, then give me 5 specific, actionable improvements I can make right now to get more engagement.' },
   { icon: Wand2,     label: 'Hook ideas',     msg: 'Give me 5 powerful hook ideas for the first 3 seconds of my video to stop the scroll and make people want to keep watching.' },
-  { icon: Hash,      label: 'Hashtags',       msg: 'Suggest 10 relevant hashtags for my CheckMate dating profile video that will maximize reach.' },
+  { icon: Hash,      label: 'Hashtags',       msg: 'Suggest 10 relevant hashtags for my Vipi dating profile video that will maximize reach.' },
 ];
 
 function isScriptLike(text: string): boolean {
@@ -42,20 +44,16 @@ function isScriptLike(text: string): boolean {
 export default function Studio() {
   const navigate    = useNavigate();
   const fileRef     = useRef<HTMLInputElement>(null);
-  const imgFileRef  = useRef<HTMLInputElement>(null);
   const chatEndRef  = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLInputElement>(null);
 
-  /* video */
+  /* video — v0.1 is video-only, no image-post path (Codex's finalized Post
+     contract has no way to represent one: videoUrl, no mediaType field) */
   const [videoFile, setVideoFile]   = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [caption, setCaption]       = useState('');
   const [uploading, setUploading]   = useState(false);
   const [dragOver, setDragOver]     = useState(false);
-
-  /* images */
-  const [images, setImages]         = useState<{ file: File; url: string }[]>([]);
-  const [imgDragOver, setImgDragOver] = useState(false);
 
   /* script */
   const [script, setScript]         = useState('');
@@ -79,24 +77,11 @@ export default function Studio() {
     setPreviewUrl(URL.createObjectURL(f));
   }
 
-  function addImages(files: FileList) {
-    const next = Array.from(files)
-      .filter(f => f.type.startsWith('image/'))
-      .slice(0, 12 - images.length)
-      .map(f => ({ file: f, url: URL.createObjectURL(f) }));
-    if (next.length) setImages(prev => [...prev, ...next]);
-  }
-
   const onVideoDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
     const f = e.dataTransfer.files[0];
     if (f) pickVideo(f);
   }, []);
-
-  const onImageDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setImgDragOver(false);
-    addImages(e.dataTransfer.files);
-  }, [images.length]);
 
   function saveToScript(content: string, idx: number) {
     setScript(content);
@@ -119,8 +104,6 @@ export default function Studio() {
         message: msg,
         caption: caption || undefined,
         hasVideo: !!videoFile,
-        hasImages: images.length > 0,
-        imageCount: images.length,
         script: script || undefined,
         model: aiModel,
       });
@@ -135,13 +118,15 @@ export default function Studio() {
   }
 
   async function publish() {
-    if (!videoFile && images.length === 0) return;
+    if (!videoFile) return;
     setUploading(true);
     try {
-      const token = localStorage.getItem('demo_token') ?? (await auth.currentUser?.getIdToken()) ?? '';
+      const token = (await getAccessToken()) ?? '';
       const formData = new FormData();
-      const isVideo  = !!videoFile;
-      formData.append('video', isVideo ? videoFile! : images[0].file);
+      // Field name must be 'media' — matches postMediaUpload.single('media')
+      // in backend/src/routes/upload.ts. Pre-existing bug fixed in passing:
+      // this previously sent 'video', which that route doesn't accept.
+      formData.append('media', videoFile);
 
       const res = await fetch('/api/upload/post-media', {
         method: 'POST',
@@ -151,62 +136,28 @@ export default function Studio() {
       const { url, error: uploadError } = await res.json();
       if (!res.ok) throw new Error(uploadError ?? 'Upload failed');
 
-      await api.post('/social/posts', {
-        mediaUrl: url,
-        mediaType: isVideo ? 'VIDEO' : 'IMAGE',
+      await socialService.createPost({
+        videoUrl: url,
         caption: caption || undefined,
       });
       toast.success('Published!');
       navigate('/home');
-    } catch (err: any) {
-      toast.error(err.message ?? 'Failed to publish');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to publish'));
     } finally {
       setUploading(false);
     }
   }
 
-  const canPublish = !!videoFile || images.length > 0;
+  const canPublish = !!videoFile;
 
   const TABS: { key: CenterTab; label: string }[] = [
     { key: 'video',  label: 'Video' },
-    { key: 'images', label: images.length ? `Images (${images.length})` : 'Images' },
     { key: 'script', label: script ? 'Script ●' : 'Script' },
   ];
 
   return (
-    <div className="fixed inset-0 bg-[#050508] flex">
-
-      {/* ── LEFT SIDEBAR ── */}
-      <aside className="flex-none flex flex-col bg-[#0a0a0f]" style={{ width: 220 }}>
-        <div className="px-6 py-5 flex-none">
-          <span className="text-white font-bold text-lg tracking-tight">CheckMate</span>
-          <p className="text-white/30 text-xs mt-0.5">Studio</p>
-        </div>
-        <nav className="flex-1 px-3 space-y-1">
-          {[
-            { to: '/home',          icon: Home,       label: 'Home' },
-            { to: '/explore',       icon: Search,     label: 'Explore' },
-            { to: '/create',        icon: PlusSquare, label: 'Quick Post' },
-            { to: '/studio',        icon: Film,       label: 'Studio' },
-            { to: '/matches',       icon: Heart,      label: 'Matches' },
-            { to: '/notifications', icon: Bell,       label: 'Alerts' },
-            { to: '/profile',       icon: User,       label: 'Profile' },
-          ].map(({ to, icon: Icon, label }) => (
-            <NavLink key={to} to={to} className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isActive ? 'bg-[#ff4d8d]/12 text-[#ff4d8d]' : 'text-white/50 hover:text-white hover:bg-white/5'}`
-            }>
-              <Icon className="w-5 h-5 flex-none" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="px-4 py-5 flex-none">
-          <div className="rounded-xl bg-gradient-to-br from-[#ff4d8d]/10 to-[#8b5cf6]/10 border border-white/8 p-3">
-            <p className="text-white/50 text-[10px] uppercase tracking-widest mb-1">AI Powered</p>
-            <p className="text-white/70 text-xs leading-snug">Create scripts, concepts, and visual ideas with your AI assistant.</p>
-          </div>
-        </div>
-      </aside>
+    <div className="fixed inset-0 bg-[#050508] flex lg:pl-[220px]">
 
       {/* ── CENTER ── */}
       <div className="flex-1 flex flex-col overflow-hidden border-r border-white/6">
@@ -233,7 +184,7 @@ export default function Studio() {
           {canPublish && (
             <div className="flex gap-3">
               <button
-                onClick={() => { setVideoFile(null); setPreviewUrl(null); setImages([]); }}
+                onClick={() => { setVideoFile(null); setPreviewUrl(null); }}
                 className="px-4 py-2 rounded-xl border border-white/10 text-white/50 text-sm hover:text-white transition-colors"
               >
                 Discard
@@ -247,6 +198,15 @@ export default function Studio() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* AI-assist blurb — was in the page's own sidebar, now that the
+            sidebar is shared/global this lives inline in Studio itself. */}
+        <div className="px-8 pt-4 flex-none">
+          <div className="rounded-xl bg-gradient-to-br from-[#ff4d8d]/10 to-[#8b5cf6]/10 border border-white/8 px-4 py-3 flex items-center gap-3">
+            <span className="text-white/50 text-[10px] uppercase tracking-widest flex-none">AI Powered</span>
+            <p className="text-white/70 text-xs leading-snug">Create scripts, concepts, and visual ideas with your AI assistant.</p>
+          </div>
         </div>
 
         {/* Tab content */}
@@ -322,85 +282,6 @@ export default function Studio() {
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {/* IMAGES TAB */}
-            {activeTab === 'images' && (
-              <motion.div key="images" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-white font-semibold">Photos & Images</p>
-                    <p className="text-white/30 text-sm">Add photos to your post or use as reference for the AI</p>
-                  </div>
-                  {images.length > 0 && (
-                    <button
-                      onClick={() => imgFileRef.current?.click()}
-                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/6 border border-white/10 text-white/60 hover:text-white text-sm transition-colors"
-                    >
-                      <Plus className="w-4 h-4" /> Add more
-                    </button>
-                  )}
-                </div>
-                <input ref={imgFileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { if (e.target.files) addImages(e.target.files); }} />
-
-                {images.length === 0 ? (
-                  <div
-                    onDragOver={(e) => { e.preventDefault(); setImgDragOver(true); }}
-                    onDragLeave={() => setImgDragOver(false)}
-                    onDrop={onImageDrop}
-                    onClick={() => imgFileRef.current?.click()}
-                    className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed cursor-pointer transition-all ${imgDragOver ? 'border-[#8b5cf6] bg-[#8b5cf6]/5' : 'border-white/10 bg-white/2 hover:border-white/20 hover:bg-white/4'}`}
-                    style={{ minHeight: 280 }}
-                  >
-                    <div className="w-16 h-16 rounded-2xl bg-white/6 flex items-center justify-center mb-4">
-                      <ImageIcon className="w-7 h-7 text-white/30" />
-                    </div>
-                    <p className="text-white font-semibold mb-1">Add photos</p>
-                    <p className="text-white/30 text-sm mb-2">Upload images for your post or B-roll reference</p>
-                    <p className="text-white/20 text-xs">JPG, PNG, WebP · Up to 12 images</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-4 gap-3">
-                    {images.map((img, i) => (
-                      <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-white/5 group">
-                        <img src={img.url} alt="" className="w-full h-full object-cover" />
-                        <button
-                          onClick={() => setImages(prev => prev.filter((_, j) => j !== i))}
-                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                        {i === 0 && !videoFile && (
-                          <div className="absolute bottom-1.5 left-1.5 bg-[#ff4d8d] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-md">Cover</div>
-                        )}
-                      </div>
-                    ))}
-                    {images.length < 12 && (
-                      <button
-                        onClick={() => imgFileRef.current?.click()}
-                        className="aspect-square rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-white/30 hover:text-white/60 hover:border-white/20 transition-colors"
-                      >
-                        <Plus className="w-6 h-6 mb-1" />
-                        <span className="text-xs">Add</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {images.length > 0 && (
-                  <div className="rounded-xl bg-white/3 border border-white/6 px-4 py-3">
-                    <label className="text-white/40 text-xs font-semibold uppercase tracking-widest block mb-2">Caption</label>
-                    <textarea
-                      value={caption}
-                      onChange={(e) => setCaption(e.target.value.slice(0, 500))}
-                      placeholder="Write a caption for your post…"
-                      rows={3}
-                      className="w-full bg-transparent text-white text-sm placeholder-white/20 resize-none focus:outline-none [color-scheme:dark]"
-                    />
-                    <p className="text-white/20 text-xs text-right">{caption.length}/500</p>
                   </div>
                 )}
               </motion.div>

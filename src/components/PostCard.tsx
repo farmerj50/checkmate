@@ -1,24 +1,30 @@
 import { useRef, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Heart, MessageCircle, BadgeCheck } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { api } from '../lib/api';
+import { BadgeCheck, Video } from 'lucide-react';
 import { normalizeAssetUrl } from '../utils/helpers';
-import { AnimatePresence } from 'framer-motion';
-import CommentSheet from './CommentSheet';
-import type { Post } from '../types';
+import ReactionBar from './social/ReactionBar';
+import ReplyThread from './social/ReplyThread';
+import SaveButton from './social/SaveButton';
+import type { SocialPost } from '../services/social';
 
 interface Props {
-  post: Post;
+  post: SocialPost;
+  onChange?: (updated: SocialPost) => void;
 }
 
-export default function PostCard({ post }: Props) {
+export default function PostCard({ post: initialPost, onChange }: Props) {
   const navigate = useNavigate();
   const videoRef  = useRef<HTMLVideoElement>(null);
   const cardRef   = useRef<HTMLDivElement>(null);
-  const [liked, setLiked]   = useState(post.isLikedByMe);
-  const [count, setCount]   = useState(post.likeCount);
-  const [showComments, setShowComments] = useState(false);
+  const [post, setPost] = useState(initialPost);
+  const [showReplies, setShowReplies] = useState(false);
+
+  useEffect(() => setPost(initialPost), [initialPost]);
+
+  function handleChange(updated: SocialPost) {
+    setPost(updated);
+    onChange?.(updated);
+  }
 
   // IntersectionObserver: autoplay when in viewport
   useEffect(() => {
@@ -35,20 +41,8 @@ export default function PostCard({ post }: Props) {
     return () => obs.disconnect();
   }, []);
 
-  async function toggleLike() {
-    const next = !liked;
-    setLiked(next);
-    setCount((c) => c + (next ? 1 : -1));
-    try {
-      await api.post(`/social/posts/${post.id}/like`, {});
-    } catch {
-      setLiked(!next);
-      setCount((c) => c + (next ? -1 : 1));
-    }
-  }
-
   const avatar = normalizeAssetUrl(post.author.profilePictures?.[0]);
-  const media  = normalizeAssetUrl(post.mediaUrl);
+  const media  = normalizeAssetUrl(post.videoUrl);
 
   return (
     <>
@@ -66,16 +60,12 @@ export default function PostCard({ post }: Props) {
 
         {/* Media */}
         <div className="relative aspect-[4/5] w-full bg-black">
-          {post.mediaType === 'VIDEO' ? (
-            <video
-              ref={videoRef}
-              src={media ?? ''}
-              className="w-full h-full object-contain"
-              loop muted playsInline
-            />
-          ) : (
-            <img src={media ?? ''} alt="" className="w-full h-full object-contain" />
-          )}
+          <video
+            ref={videoRef}
+            src={media ?? ''}
+            className="w-full h-full object-contain"
+            loop muted playsInline
+          />
           {post.caption && (
             <div className="absolute bottom-3 left-3 right-3 pointer-events-none">
               <span className="bg-black/55 backdrop-blur-sm text-white text-sm px-3 py-1.5 rounded-xl">
@@ -87,17 +77,11 @@ export default function PostCard({ post }: Props) {
 
         {/* Actions */}
         <div className="flex items-center gap-5 px-4 py-3">
-          <button onClick={toggleLike} className="flex items-center gap-1.5">
-            <motion.div whileTap={{ scale: 1.3 }}>
-              <Heart
-                className={`w-6 h-6 transition-colors ${liked ? 'text-[#ff4d8d] fill-[#ff4d8d]' : 'text-white/70'}`}
-              />
-            </motion.div>
-            <span className="text-white/60 text-sm">{count > 0 ? count : ''}</span>
-          </button>
-          <button onClick={() => setShowComments(true)} className="flex items-center gap-1.5">
-            <MessageCircle className="w-6 h-6 text-white/70" />
-            <span className="text-white/60 text-sm">{post.commentCount > 0 ? post.commentCount : ''}</span>
+          <ReactionBar post={post} onChange={handleChange} variant="inline" />
+          <SaveButton post={post} onChange={handleChange} variant="inline" />
+          <button onClick={() => setShowReplies(true)} className="flex items-center gap-1.5">
+            <Video className="w-5 h-5 text-white/70" />
+            <span className="text-white/60 text-sm">{post.replyCount > 0 ? post.replyCount : 'Reply'}</span>
           </button>
         </div>
 
@@ -112,18 +96,12 @@ export default function PostCard({ post }: Props) {
         )}
       </div>
 
-      <AnimatePresence>
-        {showComments && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[299] bg-black/60"
-              onClick={() => setShowComments(false)}
-            />
-            <CommentSheet postId={post.id} onClose={() => setShowComments(false)} />
-          </>
-        )}
-      </AnimatePresence>
+      {showReplies && (
+        <ReplyThread
+          postId={post.id}
+          onClose={() => setShowReplies(false)}
+        />
+      )}
     </>
   );
 }

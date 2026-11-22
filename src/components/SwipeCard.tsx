@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { motion, useMotionValue, useTransform, PanInfo } from 'framer-motion';
 import { Heart, X, MapPin, Briefcase, GraduationCap, Star, BadgeCheck } from 'lucide-react';
 import { SwipeCard as SwipeCardType } from '../types';
-import { calculateAge } from '../utils/helpers';
 
 interface SwipeCardProps {
   card: SwipeCardType;
@@ -31,7 +30,7 @@ const SwipeCard: React.FC<SwipeCardProps> = ({
   const nopeOpacity = useTransform(x, [-80, 0], [1, 0]);
   const superOpacity = useTransform(y, [-80, 0], [1, 0]);
 
-  const handleDragEnd = (_: any, info: PanInfo) => {
+  const handleDragEnd = (_: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const THRESHOLD = 100;
     const SUPER_THRESHOLD = -120;
     if (info.offset.y < SUPER_THRESHOLD && Math.abs(info.offset.x) < 60) {
@@ -129,7 +128,7 @@ const SwipeCard: React.FC<SwipeCardProps> = ({
             {/* Name row */}
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-xl font-bold text-gray-900 truncate">
-                {card.user.firstName}, {calculateAge(card.user.dateOfBirth)}
+                {card.user.firstName}{card.user.age === null ? '' : `, ${card.user.age}`}
               </h2>
               {card.user.isVerified && <BadgeCheck className="w-5 h-5 text-blue-500 flex-shrink-0" />}
             </div>
@@ -138,7 +137,7 @@ const SwipeCard: React.FC<SwipeCardProps> = ({
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-500 text-xs mb-2">
               <span className="flex items-center gap-1">
                 <MapPin className="w-3.5 h-3.5" />
-                {card.distance > 0 ? `${card.distance} km away` : 'Nearby'}
+                {card.distance === null ? 'Distance hidden' : card.distance > 0 ? `${card.distance} km away` : 'Nearby'}
               </span>
               {card.user.occupation && (
                 <span className="flex items-center gap-1">

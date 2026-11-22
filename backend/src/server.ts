@@ -1,14 +1,12 @@
+import './lib/env';
 import { createServer } from 'http';
 import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import { Server as SocketServer } from 'socket.io';
 import { prisma } from './lib/prisma';
 import { initSocket } from './socket/chat';
-
-dotenv.config({ path: '.env.dev' }); // Railway injects real env vars; this is a local dev fallback only
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -97,11 +95,13 @@ const io = new SocketServer(httpServer, {
 initSocket(io);
 setIo(io);
 
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`⚡ Socket.io ready`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`⚡ Socket.io ready`);
+    console.log(`📱 Environment: ${process.env.NODE_ENV}`);
+  });
+}
 
 process.on('SIGTERM', async () => {
   await prisma.$disconnect();

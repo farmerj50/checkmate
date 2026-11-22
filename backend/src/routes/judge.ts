@@ -3,6 +3,9 @@ import OpenAI from 'openai';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { io } from '../lib/io';
+import { getAccessibleMatch, activeUserIdentityWhere } from '../lib/access';
+import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 
 const router = express.Router();
 
@@ -12,7 +15,7 @@ function getOpenAI(): OpenAI | null {
   return new OpenAI({ apiKey: key });
 }
 
-const EVAL_SYSTEM_PROMPT = `You are CheckMate Resolve — a neutral AI mediator. Evaluate the conversation for:
+const EVAL_SYSTEM_PROMPT = `You are Vipi Resolve — a neutral AI mediator. Evaluate the conversation for:
 - Tier 1 (notice): Emotional escalation, raised tension, minor hostility, communication slowing
 - Tier 2 (recommendation): Repeated hostility, circular arguments, bad-faith responses, no progress, threats
 
@@ -25,7 +28,7 @@ Rules:
 - Never take sides. Never reference specific users by name. Never alter or fabricate messages.
 - All interventions are visible to both participants.`;
 
-const SUMMARY_SYSTEM_PROMPT = `You are CheckMate Resolve. Generate a brief neutral post-session summary.
+const SUMMARY_SYSTEM_PROMPT = `You are Vipi Resolve. Generate a brief neutral post-session summary.
 Respond ONLY with valid JSON: { "disagreement": string, "breakdownReason": string, "suggestion": string }
 Each field is exactly one neutral sentence. Do not take sides.`;
 
@@ -33,7 +36,7 @@ async function logEvent(
   sessionId: string,
   type: string,
   actorId: string | null,
-  metadata?: object
+  metadata?: Prisma.InputJsonObject
 ) {
   await prisma.judgeEvent.create({
     data: { sessionId, type, actorId, metadata: metadata ?? undefined },
@@ -41,14 +44,13 @@ async function logEvent(
 }
 
 async function getMatchParties(matchId: string, userId: string) {
-  const match = await prisma.match.findFirst({
-    where: {
-      id: matchId,
-      OR: [{ user1Id: userId }, { user2Id: userId }],
-      isActive: true,
-    },
-  });
+  const match = await getAccessibleMatch(userId, matchId);
   if (!match) return null;
+  // Persist cooldown expiry so a process restart cannot leave chat stuck.
+  await prisma.judgeSession.updateMany({
+    where: { matchId, status: 'COOLDOWN', cooldownEndsAt: { lte: new Date() } },
+    data: { status: 'PAUSED' },
+  });
   const isUser1 = match.user1Id === userId;
   const otherId = isUser1 ? match.user2Id : match.user1Id;
   return { match, isUser1, otherId };
@@ -57,7 +59,8 @@ async function getMatchParties(matchId: string, userId: string) {
 export async function evaluateConversation(matchId: string) {
   try {
     const session = await prisma.judgeSession.findUnique({ where: { matchId } });
-    if (!session || !['ACTIVE', 'TIER1_NOTICE'].includes(session.status)) return;
+    if (!session || !session.userAApproved || !session.userBApproved ||
+        !['ACTIVE', 'TIER1_NOTICE'].includes(session.status)) return;
 
     const openai = getOpenAI();
     if (!openai) return;
@@ -86,25 +89,26 @@ export async function evaluateConversation(matchId: string) {
     });
 
     const text = response.choices[0]?.message?.content ?? '{}';
-    const result = JSON.parse(text) as {
-      tier: 0 | 1 | 2;
-      confidenceLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-      reason: string | null;
-    };
+    const result = z.object({
+      tier: z.union([z.literal(0), z.literal(1), z.literal(2)]),
+      confidenceLevel: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+      reason: z.string().max(500).nullable(),
+    }).parse(JSON.parse(text));
 
     if (result.tier === 1 && session.tier < 1) {
-      await prisma.judgeSession.update({
-        where: { matchId },
+      const changed = await prisma.judgeSession.updateMany({
+        where: { matchId, status: { in: ['ACTIVE', 'TIER1_NOTICE'] }, tier: { lt: 1 }, userAApproved: true, userBApproved: true },
         data: { tier: 1, status: 'TIER1_NOTICE' },
       });
+      if (!changed.count) return;
       io.to(`match:${matchId}`).emit('judge:notice', {
         reason: result.reason,
         confidenceLevel: result.confidenceLevel,
       });
       await logEvent(session.id, 'NOTICE', null, result);
     } else if (result.tier === 2) {
-      await prisma.judgeSession.update({
-        where: { matchId },
+      const changed = await prisma.judgeSession.updateMany({
+        where: { matchId, status: { in: ['ACTIVE', 'TIER1_NOTICE'] }, userAApproved: true, userBApproved: true },
         data: {
           tier: 2,
           status: 'RECOMMENDED_STOP',
@@ -114,6 +118,7 @@ export async function evaluateConversation(matchId: string) {
           judgeStrikeCount: { increment: 1 },
         },
       });
+      if (!changed.count) return;
       io.to(`match:${matchId}`).emit('judge:recommendation', {
         reason: result.reason,
         confidenceLevel: result.confidenceLevel,
@@ -152,11 +157,9 @@ async function generateSummary(matchId: string, sessionId: string) {
     });
 
     const text = response.choices[0]?.message?.content ?? '{}';
-    const result = JSON.parse(text) as {
-      disagreement: string;
-      breakdownReason: string;
-      suggestion: string;
-    };
+    const result = z.object({
+      disagreement: z.string().max(500), breakdownReason: z.string().max(500), suggestion: z.string().max(500),
+    }).parse(JSON.parse(text));
 
     const summaryText = `${result.disagreement} ${result.breakdownReason} ${result.suggestion}`;
 
@@ -178,7 +181,7 @@ router.get('/:matchId/judge', authenticateToken, async (req: AuthenticatedReques
     const { matchId } = req.params;
     const userId = req.user!.uid;
 
-    const dbUser = await prisma.user.findUnique({ where: { firebaseUid: userId }, select: { id: true } });
+    const dbUser = await prisma.user.findUnique({ where: activeUserIdentityWhere(userId), select: { id: true } });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
 
     const parties = await getMatchParties(matchId, dbUser.id);
@@ -199,18 +202,23 @@ router.post('/:matchId/judge/request', authenticateToken, async (req: Authentica
     const userId = req.user!.uid;
 
     const dbUser = await prisma.user.findUnique({
-      where: { firebaseUid: userId },
+      where: activeUserIdentityWhere(userId),
       select: { id: true, isPremium: true },
     });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
     if (!dbUser.isPremium) {
-      return res.status(403).json({ error: 'CheckMate Resolve is a premium feature' });
+      return res.status(403).json({ error: 'Vipi Resolve is a premium feature' });
     }
 
     const parties = await getMatchParties(matchId, dbUser.id);
     if (!parties) return res.status(404).json({ error: 'Match not found' });
 
     const { isUser1, otherId } = parties;
+
+    const existingSession = await prisma.judgeSession.findUnique({ where: { matchId } });
+    if (existingSession && existingSession.status !== 'DECLINED') {
+      return res.status(409).json({ error: 'A mediation session is already in progress' });
+    }
 
     const session = await prisma.judgeSession.upsert({
       where: { matchId },
@@ -251,7 +259,7 @@ router.post('/:matchId/judge/approve', authenticateToken, async (req: Authentica
     const { matchId } = req.params;
     const userId = req.user!.uid;
 
-    const dbUser = await prisma.user.findUnique({ where: { firebaseUid: userId }, select: { id: true } });
+    const dbUser = await prisma.user.findUnique({ where: activeUserIdentityWhere(userId), select: { id: true } });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
 
     const parties = await getMatchParties(matchId, dbUser.id);
@@ -262,12 +270,14 @@ router.post('/:matchId/judge/approve', authenticateToken, async (req: Authentica
     const existing = await prisma.judgeSession.findUnique({ where: { matchId } });
     if (!existing) return res.status(404).json({ error: 'No judge session found' });
 
-    const updatedData: any = isUser1 ? { userAApproved: true } : { userBApproved: true };
+    if (existing.status !== 'REQUESTED') return res.status(409).json({ error: 'No pending request to approve' });
+
+    const updatedData: Prisma.JudgeSessionUpdateInput = isUser1 ? { userAApproved: true } : { userBApproved: true };
     const bothApproved =
       (isUser1 && existing.userBApproved) || (!isUser1 && existing.userAApproved);
     if (bothApproved) updatedData.status = 'ACTIVE';
 
-    const session = await prisma.judgeSession.update({ where: { matchId }, data: updatedData });
+    const session = await prisma.judgeSession.update({ where: { matchId, status: 'REQUESTED' }, data: updatedData });
 
     if (bothApproved) {
       await logEvent(session.id, 'APPROVED', dbUser.id);
@@ -287,7 +297,7 @@ router.post('/:matchId/judge/decline', authenticateToken, async (req: Authentica
     const { matchId } = req.params;
     const userId = req.user!.uid;
 
-    const dbUser = await prisma.user.findUnique({ where: { firebaseUid: userId }, select: { id: true } });
+    const dbUser = await prisma.user.findUnique({ where: activeUserIdentityWhere(userId), select: { id: true } });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
 
     const parties = await getMatchParties(matchId, dbUser.id);
@@ -296,8 +306,10 @@ router.post('/:matchId/judge/decline', authenticateToken, async (req: Authentica
     const existing = await prisma.judgeSession.findUnique({ where: { matchId } });
     if (!existing) return res.status(404).json({ error: 'No judge session found' });
 
+    if (existing.status !== 'REQUESTED') return res.status(409).json({ error: 'Only a pending request can be declined' });
+
     const session = await prisma.judgeSession.update({
-      where: { matchId },
+      where: { matchId, status: 'REQUESTED' },
       data: { status: 'DECLINED' },
     });
 
@@ -317,7 +329,7 @@ router.post('/:matchId/judge/agree-stop', authenticateToken, async (req: Authent
     const { matchId } = req.params;
     const userId = req.user!.uid;
 
-    const dbUser = await prisma.user.findUnique({ where: { firebaseUid: userId }, select: { id: true } });
+    const dbUser = await prisma.user.findUnique({ where: activeUserIdentityWhere(userId), select: { id: true } });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
 
     const parties = await getMatchParties(matchId, dbUser.id);
@@ -326,22 +338,21 @@ router.post('/:matchId/judge/agree-stop', authenticateToken, async (req: Authent
     const { isUser1 } = parties;
 
     const existing = await prisma.judgeSession.findUnique({ where: { matchId } });
-    if (!existing || !existing.judgeRecommendedStop) {
+    if (!existing || existing.status !== 'RECOMMENDED_STOP' || !existing.judgeRecommendedStop) {
       return res.status(400).json({ error: 'No active recommendation to agree to' });
     }
 
-    const updateData: any = isUser1
+    const updateData: Prisma.JudgeSessionUpdateInput = isUser1
       ? { userAAgreesToStop: true }
       : { userBAgreesToStop: true };
     updateData.judgeStrikeCount = { increment: 1 };
 
-    const otherAgreed = isUser1 ? existing.userBAgreesToStop : existing.userAAgreesToStop;
     const cooldownEndsAt = new Date(Date.now() + 5 * 60 * 1000);
 
     updateData.status = 'COOLDOWN';
     updateData.cooldownEndsAt = cooldownEndsAt;
 
-    const session = await prisma.judgeSession.update({ where: { matchId }, data: updateData });
+    const session = await prisma.judgeSession.update({ where: { matchId, status: 'RECOMMENDED_STOP' }, data: updateData });
 
     await logEvent(session.id, 'COOLDOWN', dbUser.id);
     io.to(`match:${matchId}`).emit('judge:cooldown', { cooldownEndsAt: cooldownEndsAt.toISOString() });
@@ -350,7 +361,7 @@ router.post('/:matchId/judge/agree-stop', authenticateToken, async (req: Authent
     setTimeout(async () => {
       try {
         const updated = await prisma.judgeSession.update({
-          where: { matchId, status: 'COOLDOWN' },
+          where: { matchId, status: 'COOLDOWN', cooldownEndsAt },
           data: { status: 'PAUSED' },
         });
         io.to(`match:${matchId}`).emit('judge:paused');
@@ -358,7 +369,7 @@ router.post('/:matchId/judge/agree-stop', authenticateToken, async (req: Authent
       } catch {
         // Session may have been resumed — ignore
       }
-    }, 5 * 60 * 1000);
+    }, 5 * 60 * 1000).unref();
 
     return res.json({ session });
   } catch (err) {
@@ -373,7 +384,7 @@ router.post('/:matchId/judge/continue', authenticateToken, async (req: Authentic
     const { matchId } = req.params;
     const userId = req.user!.uid;
 
-    const dbUser = await prisma.user.findUnique({ where: { firebaseUid: userId }, select: { id: true } });
+    const dbUser = await prisma.user.findUnique({ where: activeUserIdentityWhere(userId), select: { id: true } });
     if (!dbUser) return res.status(401).json({ error: 'User not found' });
 
     const parties = await getMatchParties(matchId, dbUser.id);
@@ -384,30 +395,34 @@ router.post('/:matchId/judge/continue', authenticateToken, async (req: Authentic
     const existing = await prisma.judgeSession.findUnique({ where: { matchId } });
     if (!existing) return res.status(404).json({ error: 'No judge session found' });
 
-    const updateData: any = isUser1
+    if (!existing.userAApproved || !existing.userBApproved ||
+        !['RECOMMENDED_STOP', 'PAUSED'].includes(existing.status)) {
+      return res.status(409).json({ error: 'Both participants must approve mediation and any cooldown must end before continuing' });
+    }
+
+    const updateData: Prisma.JudgeSessionUpdateInput = isUser1
       ? { userAWantsToContinue: true }
       : { userBWantsToContinue: true };
 
-    const otherWantsToContinue = isUser1 ? existing.userBWantsToContinue : existing.userAWantsToContinue;
-
-    // Either party voting to continue from RECOMMENDED_STOP resets to ACTIVE
-    // From PAUSED, both must vote to resume
-    const isPaused = existing.status === 'PAUSED';
-    const shouldResume = isPaused ? otherWantsToContinue : true;
-
-    if (shouldResume) {
-      updateData.status = 'ACTIVE';
-      updateData.judgeRecommendedStop = false;
-      updateData.tier = 0;
-      updateData.stopReason = null;
-      updateData.userAAgreesToStop = false;
-      updateData.userBAgreesToStop = false;
-      updateData.userAWantsToContinue = false;
-      updateData.userBWantsToContinue = false;
-      updateData.cooldownEndsAt = null;
-    }
-
-    const session = await prisma.judgeSession.update({ where: { matchId }, data: updateData });
+    // Persist each vote, then atomically resume only after both votes exist.
+    // A concurrent stop or decline cannot be overwritten by a stale read.
+    const voted = await prisma.judgeSession.updateMany({
+      where: { matchId, status: existing.status }, data: updateData,
+    });
+    if (!voted.count) return res.status(409).json({ error: 'Session changed; refresh before continuing' });
+    const resumed = await prisma.judgeSession.updateMany({
+      where: {
+        matchId, status: existing.status,
+        ...(existing.status === 'PAUSED' ? { userAWantsToContinue: true, userBWantsToContinue: true } : {}),
+      },
+      data: {
+        status: 'ACTIVE', judgeRecommendedStop: false, tier: 0, stopReason: null,
+        userAAgreesToStop: false, userBAgreesToStop: false,
+        userAWantsToContinue: false, userBWantsToContinue: false, cooldownEndsAt: null,
+      },
+    });
+    const shouldResume = resumed.count > 0;
+    const session = await prisma.judgeSession.findUniqueOrThrow({ where: { matchId } });
 
     if (shouldResume) {
       await logEvent(session.id, 'RESUMED', dbUser.id);

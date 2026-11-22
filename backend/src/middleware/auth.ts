@@ -1,72 +1,62 @@
+import '../lib/env';
 import { Request, Response, NextFunction } from 'express';
-import admin from 'firebase-admin';
+import { cert, getApp, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
-export interface AuthenticatedRequest extends Request {
-  user?: { uid: string };
+export interface AuthIdentity {
+  uid: string;
+  email?: string;
+  emailVerified?: boolean;
+}
+export interface AuthenticatedRequest extends Request { user?: AuthIdentity }
+export class AuthenticationUnavailable extends Error {}
+
+export function demoAuthEnabled(): boolean {
+  return ['development', 'test'].includes(process.env.NODE_ENV ?? '') &&
+    process.env.DEMO_AUTH_ENABLED === 'true';
 }
 
-// Initialize Firebase Admin once, only if credentials are available
-if (!admin.apps.length) {
-  try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      // Preferred: full service account JSON — JSON.parse handles \n in private_key automatically
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-      console.log('✅ Firebase Admin initialized (service account JSON)');
-    } else {
-      const projectId   = process.env.FIREBASE_PROJECT_ID;
-      const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-      const rawKey      = (process.env.FIREBASE_PRIVATE_KEY ?? '').replace(/^["']|["']$/g, '');
-      const privateKey  = rawKey.replace(/\\n/g, '\n');
-      if (projectId && clientEmail && privateKey) {
-        admin.initializeApp({
-          credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-          projectId,
-        });
-        console.log('✅ Firebase Admin initialized (individual vars)');
-      } else {
-        console.warn('⚠️  Firebase env vars not set — running in demo auth mode.');
-      }
+export async function verifyAccessToken(token: unknown): Promise<AuthIdentity> {
+  if (typeof token !== 'string' || !token || token.length > 8192) throw new Error('Invalid access token');
+  if (!getApps().length) {
+    const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    const projectId = process.env.FIREBASE_PROJECT_ID;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const rawKey = process.env.FIREBASE_PRIVATE_KEY;
+    if (!json && !projectId && !clientEmail && !rawKey) {
+      if (demoAuthEnabled() && /^demo_[A-Za-z0-9_.@+-]{1,200}$/.test(token)) return { uid: token };
+      throw new AuthenticationUnavailable('Authentication is not configured');
     }
-  } catch (e) {
-    console.warn('⚠️  Firebase Admin init failed — running in demo mode.', e);
+    try {
+      const account = json ? JSON.parse(json) : {
+        projectId, clientEmail,
+        privateKey: (rawKey ?? '').replace(/^["']|["']$/g, '').replace(/\\n/g, '\n'),
+      };
+      initializeApp({ credential: cert(account), projectId: account.project_id ?? account.projectId });
+    } catch {
+      // Never fall back to demo identities after a credential error.
+      throw new AuthenticationUnavailable('Authentication configuration is invalid');
+    }
   }
+  const decoded = await getAuth(getApp()).verifyIdToken(token, true);
+  return { uid: decoded.uid, email: decoded.email, emailVerified: decoded.email_verified };
 }
 
-export const authenticateToken = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-) => {
+export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const match = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization ?? '');
+  if (!match) return res.status(401).json({ error: 'Access token required' });
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-      return res.status(401).json({ error: 'Access token required' });
-    }
-
-    // If Firebase Admin is initialized, verify the real token
-    if (admin.apps.length && admin.app().options.projectId) {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      req.user = { uid: decodedToken.uid };
-    } else {
-      // Demo mode: accept any token, treat it as the demo user uid
-      // In demo mode the token itself is used as the uid so different
-      // tokens map to different users (enables multi-user local testing)
-      req.user = { uid: token.startsWith('demo_') ? token : 'demo_user' };
-    }
-
+    req.user = await verifyAccessToken(match[1]);
     next();
   } catch (error) {
-    console.error('Token verification error:', error);
-    res.status(403).json({ error: 'Invalid or expired token' });
+    if (error instanceof AuthenticationUnavailable) {
+      return res.status(503).json({ error: 'Authentication is temporarily unavailable' });
+    }
+    return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
 
 export const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   next();
 };

@@ -1,0 +1,92 @@
+{
+  "reviewedAt": "2026-11-22T03:08:59.435Z",
+  "scope": "Remaining source-code defects identified after dependency remediation; no deployment or live-service operations",
+  "fixed": [
+    "Backend compilation: Judge Prisma models and additive migration, geocoding validation, Stripe construction and type compatibility; build failures are no longer swallowed.",
+    "Production authentication fails closed for missing or invalid Firebase credentials. Demo tokens require explicit backend opt-in in development or test and are disabled in production. HTTP and sockets share revoked-token verification.",
+    "Chat, typing and read receipts check active match membership, age, account status and blocks. Receipts update only received messages. Presence is limited to eligible matches and respects activity privacy.",
+    "Blocking deactivates matches and removes follows. Passes no longer count as positive likes, produce matches or consume normal daily like quotas.",
+    "Public profile and message payloads omit email, Firebase identity, birth date, device tokens, billing IDs and coordinates. Age, location/distance and activity privacy controls are honored; missing distance is not invented.",
+    "Profile mutations cannot claim foreign upload URLs. Deletion validates ownership, filename, containment and symlinks. Upload errors clean up newly written media; multipart and image bounds are enforced.",
+    "Identity verification no longer self-approves. The UI explains that verification is unavailable until a trusted review workflow exists.",
+    "Private and rejected post metadata is filtered from feeds, profiles, replies, saves and reactions. Pagination validates cursors and limits, handles identical timestamps and terminates correctly.",
+    "Notification read operations are restricted to the recipient.",
+    "Judge approval and cooldown transitions cannot be bypassed through continue, approve, decline or request. Late AI evaluations cannot overwrite cooldowns; concurrent resume votes are handled.",
+    "Stripe webhooks validate signatures, return retryable failures when configuration or persistence is unavailable, and preserve subscription identity on pause for later resume.",
+    "Frontend API, uploads and sockets share token selection; sockets refresh credentials on reconnect and disconnect on logout. Profile editing preserves canonical media URLs for mutations.",
+    "All existing active frontend lint errors and warnings resolved with concrete typing and module separation. Routes are lazy-loaded.",
+    "Container startup applies tracked migrations and fails on errors; it no longer uses db push --accept-data-loss. Docker context excludes credentials, uploads and generated files."
+  ],
+  "validation": {
+    "frontend": {
+      "typecheck": "passed",
+      "lint": {
+        "command": "npm run lint",
+        "scope": "src",
+        "errors": 0,
+        "warnings": 0,
+        "baselineErrors": 49,
+        "baselineWarnings": 8
+      },
+      "build": "passed",
+      "mainBundle": {
+        "file": "index-CLOnxAQb.js",
+        "bytes": 480143,
+        "gzipBytes": 154300,
+        "previousKilobytes": 830.39,
+        "reductionPercent": 42
+      },
+      "browser": {
+        "artifact": "defect-browser-smoke.json",
+        "passed": 10,
+        "total": 10,
+        "runtimeExceptions": 0,
+        "viewports": [
+          1440,
+          390
+        ],
+        "scope": "Public routes, redirects and horizontal overflow; external requests blocked"
+      }
+    },
+    "backend": {
+      "build": "passed",
+      "unitTests": {
+        "passed": 45,
+        "suites": 8
+      },
+      "databaseTests": {
+        "passed": 36,
+        "suites": 4,
+        "database": "Isolated temporary PostgreSQL 17.5 on localhost; no application database used"
+      },
+      "migrations": {
+        "freshDatabase": "passed",
+        "schemaDrift": "none",
+        "newMigration": "20261122023000_judge_and_passes"
+      },
+      "stripeModuleCompatibility": "Compiled CommonJS and Vitest ESM both passed; signed fixture webhooks use the real Stripe signature implementation without external requests"
+    },
+    "whitespace": "git diff --check passed",
+    "dependencyAudit": "No dependency versions changed in this remediation. Previous full frontend and backend audits both had zero findings; see dependency-remediation-2026-11-21.json."
+  },
+  "rollout": {
+    "deployed": false,
+    "productionDatabaseModified": false,
+    "requiredSteps": [
+      "Back up the target database and check its migration history; baseline existing schemas if previously managed with db push. Apply tracked migrations with prisma migrate deploy before serving this build.",
+      "Supply production Firebase and billing secrets through deployment configuration. Local backend demo mode requires NODE_ENV=development, DEMO_AUTH_ENABLED=true and absent Firebase credentials.",
+      "For integration tests, explicitly set TEST_DATABASE_URL to a disposable localhost database with test in its name; the suite intentionally refuses implicit application-database access."
+    ]
+  },
+  "remainingReleaseWork": [
+    "Live Firebase sign-in/revocation, push delivery, Stripe test-mode checkout and deployed media persistence still need staging credentials and validation. No provider accounts or charges were used here.",
+    "Uploads are still served as static URLs. Metadata privacy and deletion ownership are fixed, but access-controlled private media delivery, storage retention and multi-instance persistence require a separate storage implementation before treating media as confidential.",
+    "Identity verification and content moderation still need trusted operational workflows. Existing badges and historical pass/like records need data review: prior passes were indistinguishable from positive likes, and prior verification was self-approved.",
+    "No container image build was run because the local Docker daemon was unavailable. The existing Vite environment file still produces a nonfatal NODE_ENV warning."
+  ],
+  "artifacts": [
+    "defect-browser-smoke.json",
+    "defect-browser-smoke.cjs",
+    "defect-frontend-build.log"
+  ]
+}

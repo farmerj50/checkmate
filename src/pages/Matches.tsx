@@ -4,11 +4,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, MessageCircle, BadgeCheck, Eye, Crown, Lock, Loader2, UserCheck } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import { normalizeAssetUrl } from '../utils/helpers';
-import type { Match, User } from '../types';
+import type { Match, PublicUser } from '../types';
 
-type MatchWithOther = Match & { otherUser: User };
+type MatchWithOther = Match & { otherUser: PublicUser };
 
 interface LikeEntry {
   id: string;
@@ -127,7 +127,7 @@ export default function Matches() {
   const viewCount = viewsData?.count ?? 0;
 
   return (
-    <div className="min-h-screen bg-[#050508] pb-24">
+    <div className="min-h-screen bg-[#050508] pb-24 lg:pl-[220px]">
 
       {/* Header */}
       <div className="sticky top-0 z-10 bg-[#050508]/95 backdrop-blur-xl border-b border-white/6 px-4 pt-4 pb-0">

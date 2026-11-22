@@ -2,19 +2,14 @@ import { auth, isDemoMode } from './firebase';
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 
+export async function getAccessToken(): Promise<string | null> {
+  if (!isDemoMode) return auth.currentUser ? auth.currentUser.getIdToken() : null;
+  return localStorage.getItem('demo_token');
+}
+
 async function getAuthHeaders(): Promise<HeadersInit> {
-  const user = auth.currentUser;
-  // Real Firebase user: use their ID token
-  if (user && !isDemoMode) {
-    const token = await user.getIdToken();
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  }
-  // Demo mode: send the stored demo token (backend accepts it as uid)
-  const demoToken = localStorage.getItem('demo_token');
-  if (demoToken) {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${demoToken}` };
-  }
-  return { 'Content-Type': 'application/json' };
+  const token = await getAccessToken();
+  return { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 
 async function request<T>(
@@ -45,5 +40,7 @@ export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body: unknown) => request<T>('POST', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
-  delete: <T>(path: string) => request<T>('DELETE', path),
+  // body is optional — DELETE /social/posts/:id/reactions needs one (which
+  // emoji to remove); every existing DELETE call site keeps working unchanged.
+  delete: <T>(path: string, body?: unknown) => request<T>('DELETE', path, body),
 };
